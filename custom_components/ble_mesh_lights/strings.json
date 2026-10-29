@@ -1,0 +1,388 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BLE Mesh Lights",
+        "description": "Choose the ESPHome boards with the ble-adv-tx package that send to and listen for your lights.",
+        "data": {
+          "boards": "Proxy boards",
+          "base_address": "Base address",
+          "command_interval": "Minimum command interval",
+          "outage_sensor": "Power outage sensor",
+          "power_cycle_gap": "Short power cut detection"
+        },
+        "data_description": {
+          "boards": "ESPHome boards running the ble-adv-tx package.",
+          "base_address": "Lights get the addresses after this one (0x7E01, 0x7E02, …). Keep the default unless it clashes with other Bluetooth Mesh devices. It cannot be changed once a light is added.",
+          "command_interval": "Shortest time between two commands to the same light.",
+          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage. Lights set to \"Restore previous state\" return to their last state then.",
+          "power_cycle_gap": "A light keeps advertising for about 7 s after it is switched off at the wall; in the first 30 minutes after it gets power it sends several messages a second. A silence of this many seconds after that counts as a possible short switch-off, and the light's state is marked uncertain. Shorter: catches quicker cycles, but a weak signal gives more false alarms. Cycles under about 7 s cannot be seen at all."
+        }
+      }
+    },
+    "error": {
+      "no_boards": "Choose at least one ESPHome board with the ble-adv-tx package (its adv_svc_v1 action must exist).",
+      "invalid_base_address": "Enter a hexadecimal address from 0x0001 to 0x7F00."
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured. Only a single configuration is possible."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "settings": "Settings",
+          "remotes": "Remotes"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "description": "Base address: {base_address}. It cannot be changed once a light has been added, because the lights are paired with addresses derived from it.",
+        "data": {
+          "boards": "Proxy boards",
+          "base_address": "Base address",
+          "command_interval": "Minimum command interval",
+          "outage_sensor": "Power outage sensor",
+          "power_cycle_gap": "Short power cut detection"
+        },
+        "data_description": {
+          "boards": "ESPHome boards running the ble-adv-tx package.",
+          "base_address": "Lights get the addresses after this one (0x7E01, 0x7E02, …). Keep the default unless it clashes with other Bluetooth Mesh devices. It cannot be changed once a light is added.",
+          "command_interval": "Shortest time between two commands to the same light.",
+          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage. Lights set to \"Restore previous state\" return to their last state then.",
+          "power_cycle_gap": "A light keeps advertising for about 7 s after it is switched off at the wall; in the first 30 minutes after it gets power it sends several messages a second. A silence of this many seconds after that counts as a possible short switch-off, and the light's state is marked uncertain. Shorter: catches quicker cycles, but a weak signal gives more false alarms. Cycles under about 7 s cannot be seen at all."
+        }
+      },
+      "remotes": {
+        "title": "Remotes",
+        "description": "Known remotes, new remotes heard in the last 30 minutes, and ignored remotes.",
+        "data": {
+          "remote": "Remote"
+        }
+      },
+      "remote_action": {
+        "title": "Remote {address}",
+        "menu_options": {
+          "remote_lamps": "Choose its lamps",
+          "remote_remove": "Forget this remote",
+          "remote_ignore": "Ignore this remote",
+          "remote_unignore": "Stop ignoring this remote"
+        }
+      },
+      "remote_lamps": {
+        "title": "Lamps of this remote",
+        "description": "Home Assistant follows this remote's presses on the chosen lamps. Pair the remote with the lamps themselves as its manual says.",
+        "data": {
+          "lamps": "Lamps"
+        }
+      }
+    },
+    "error": {
+      "no_boards": "Choose at least one ESPHome board with the ble-adv-tx package (its adv_svc_v1 action must exist).",
+      "invalid_base_address": "Enter a hexadecimal address from 0x0001 to 0x7F00."
+    },
+    "abort": {
+      "remotes_updated": "Remotes updated.",
+      "no_remotes": "No remote has been heard yet. Press a button on a remote near a proxy board.",
+      "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again."
+    }
+  },
+  "issues": {
+    "sequence_store_missing": {
+      "title": "BLE Mesh Lights: message counters lost",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Message counters lost",
+            "description": "The file with the message counters is missing or damaged, while lights are paired. Starting again from zero would make every light ignore Home Assistant. Submit to continue with counters far above any earlier value."
+          }
+        },
+        "abort": {
+          "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again."
+        }
+      }
+    },
+    "address_collision": {
+      "title": "BLE Mesh Lights: address {address} used by another sender",
+      "description": "A message from {address}, one of the addresses Home Assistant sends as, did not come from Home Assistant. A remote or another system uses the same address, and the lights may ignore one of them. Factory-reset the affected light and add it again, or change the other sender's address."
+    },
+    "new_remote": {
+      "title": "New remote ({profile})",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "New remote ({profile})",
+            "description": "A remote with address {address} was heard for the first time. Bind it to the lights it controls, or ignore it (for example, a neighbour's remote).",
+            "menu_options": {
+              "bind": "Bind to lamps",
+              "ignore": "Ignore this remote"
+            }
+          },
+          "bind": {
+            "title": "Bind to lamps",
+            "data": {
+              "lamps": "Lamps"
+            },
+            "description": "Home Assistant follows this remote's presses on the chosen lamps."
+          }
+        },
+        "abort": {
+          "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again."
+        }
+      }
+    },
+    "profile_errors": {
+      "title": "BLE Mesh Lights: device profiles not loaded",
+      "description": "These device profiles could not be loaded, and lamps that use them stay unavailable:\n\n{errors}"
+    },
+    "board_outdated": {
+      "title": "{board}: firmware package outdated",
+      "description": "The board {board} reports ble-adv-tx package version {version}; BLE Mesh Lights needs version {required} or later. Update the board's ESPHome firmware (see the board guide)."
+    },
+    "board_not_ready": {
+      "title": "{board} is not ready",
+      "description": "The board {board} is not connected, or its action {action} does not exist. Check that the board is online and runs the ble-adv-tx package."
+    }
+  },
+  "config_subentries": {
+    "lamp": {
+      "entry_type": "Lamp",
+      "initiate_flow": {
+        "user": "Add lamp"
+      },
+      "step": {
+        "user": {
+          "title": "Add a lamp",
+          "description": "Choose the kind of light and how it should be called.",
+          "data": {
+            "profile": "Device type",
+            "name": "Name",
+            "area": "Area",
+            "aliases": "Aliases"
+          },
+          "data_description": {
+            "aliases": "Other names for Assist, for example \"street light\"."
+          }
+        },
+        "power_cycle_timeout": {
+          "title": "No light found",
+          "description": "No light was switched on within 2 minutes. Submit to try again: switch the light off at the wall, wait 5 seconds, and switch it on."
+        },
+        "blinked": {
+          "title": "Did the light blink?",
+          "description": "Home Assistant has just paired with {name}.",
+          "menu_options": {
+            "remote": "Yes, it blinked",
+            "power_cycle": "No, try again"
+          }
+        },
+        "remote": {
+          "title": "Remote",
+          "description": "Pair the light's remote with it now, so Home Assistant follows its presses.",
+          "menu_options": {
+            "remote_wait": "Pair a remote now",
+            "test": "No remote"
+          }
+        },
+        "test_result": {
+          "title": "Did the light switch off and on?",
+          "menu_options": {
+            "finish": "Yes",
+            "test_failed": "No"
+          }
+        },
+        "test_failed": {
+          "title": "The light did not react",
+          "description": "Try the test again, start over from switching the light off and on, or reset the light: {reset_hint}",
+          "menu_options": {
+            "test": "Try the test again",
+            "power_cycle": "Start over",
+            "reset_abort": "Reset the light and stop"
+          }
+        },
+        "reconfigure": {
+          "title": "Lamp settings",
+          "description": "Before you delete a lamp, reset it ({reset_hint}) and pair its remote again: the integration never sends \"unpair all\".",
+          "data": {
+            "name": "Name",
+            "after_outage": "After a power outage"
+          }
+        }
+      },
+      "progress": {
+        "power_cycle": "Switch the light off at the wall, wait 5 seconds, then switch it on. Home Assistant pairs with it as soon as it appears.",
+        "remote_wait": "Switch the light off and on again, then pair its remote as the manual says.",
+        "remote_button": "Press any button on the remote.",
+        "test": "Home Assistant switches the light off and on again."
+      },
+      "abort": {
+        "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again.",
+        "no_address_left": "No address is left above the base address.",
+        "send_failed": "Sending failed: {error}",
+        "reset_needed": "Reset the light, then add it again: {reset_hint}",
+        "reconfigure_successful": "Re-configuration was successful."
+      },
+      "error": {}
+    }
+  },
+  "selector": {
+    "after_outage": {
+      "options": {
+        "nothing": "Do nothing",
+        "restore": "Restore previous state"
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "lamp": {
+        "state_attributes": {
+          "effect": {
+            "state": {
+              "relax": "Relax",
+              "bright": "Bright",
+              "concentrate": "Concentrate",
+              "energise": "Energise",
+              "nightlight": "Nightlight"
+            }
+          },
+          "state_uncertain": {
+            "name": "State uncertain"
+          },
+          "published_at": {
+            "name": "State published"
+          }
+        }
+      }
+    },
+    "binary_sensor": {
+      "power": {
+        "name": "Power"
+      },
+      "state_uncertain": {
+        "name": "State uncertain"
+      }
+    },
+    "button": {
+      "brightness_up": {
+        "name": "Brightness up"
+      },
+      "brightness_down": {
+        "name": "Brightness down"
+      },
+      "next_color_temperature": {
+        "name": "Next color temperature"
+      }
+    },
+    "sensor": {
+      "scene": {
+        "name": "Scene",
+        "state": {
+          "none": "None",
+          "relax": "Relax",
+          "bright": "Bright",
+          "concentrate": "Concentrate",
+          "energise": "Energise",
+          "nightlight": "Nightlight"
+        }
+      },
+      "brightness": {
+        "name": "Brightness"
+      },
+      "color_temperature": {
+        "name": "Color temperature"
+      },
+      "signal_strength": {
+        "name": "Signal strength"
+      },
+      "last_beacon": {
+        "name": "Last beacon"
+      },
+      "transmitting_proxy": {
+        "name": "Transmitting proxy"
+      },
+      "last_press": {
+        "name": "Last press"
+      },
+      "missed_presses": {
+        "name": "Missed presses"
+      },
+      "paired_lamp": {
+        "name": "Paired lamp"
+      }
+    },
+    "event": {
+      "button_press": {
+        "name": "Button press",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "on": "On",
+              "off": "Off",
+              "brightness_up": "Brightness up",
+              "brightness_down": "Brightness down",
+              "color_temperature": "Color temperature",
+              "relax": "Relax",
+              "bright": "Bright",
+              "concentrate": "Concentrate",
+              "energise": "Energise",
+              "nightlight": "Nightlight",
+              "pairing": "Pairing"
+            }
+          }
+        }
+      }
+    }
+  },
+  "device": {
+    "remote": {
+      "name": "{name} remote ({lamps})"
+    }
+  },
+  "exceptions": {
+    "unknown_command": {
+      "message": "Unknown command \"{command}\". Commands: {commands}."
+    }
+  },
+  "services": {
+    "set_assumed_state": {
+      "name": "Set assumed state",
+      "description": "Tells Home Assistant what the light looks like now, without sending anything (for example after it was changed by hand).",
+      "fields": {
+        "on": {
+          "name": "On",
+          "description": "Whether the light is on."
+        },
+        "color_temp_kelvin": {
+          "name": "Color temperature",
+          "description": "Color temperature in kelvin; the nearest one the light has is used."
+        },
+        "brightness": {
+          "name": "Brightness",
+          "description": "Brightness from 0 to 255; the nearest step the light has is used."
+        }
+      }
+    },
+    "send_command": {
+      "name": "Send command",
+      "description": "Sends one named command of the light's profile.",
+      "fields": {
+        "command": {
+          "name": "Command",
+          "description": "A command id of the profile, for example relax or brightness_up."
+        }
+      }
+    },
+    "skip_sequence": {
+      "name": "Skip sequence forward",
+      "description": "Moves the light's message counter forward, for example after restoring an old backup, so the light does not ignore Home Assistant.",
+      "fields": {
+        "amount": {
+          "name": "Amount",
+          "description": "How far to move the counter forward."
+        }
+      }
+    }
+  }
+}

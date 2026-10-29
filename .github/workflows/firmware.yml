@@ -1,0 +1,26 @@
+name: Firmware
+
+on:
+  push:
+    paths:
+      - "esphome/**"
+      - ".github/esphome/**"
+      - ".github/workflows/firmware.yml"
+  pull_request:
+    paths:
+      - "esphome/**"
+      - ".github/esphome/**"
+      - ".github/workflows/firmware.yml"
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install esphome==2026.10.0
+      # Builds the example node from this checkout, with placeholder secrets. Never uploaded.
+      - run: cp .github/esphome/secrets.yaml esphome/secrets.yaml
+      - run: esphome compile esphome/local-node.yaml

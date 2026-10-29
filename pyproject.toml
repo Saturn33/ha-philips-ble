@@ -1,0 +1,26 @@
+[project]
+name = "ble-mesh-lights-dev"
+version = "0.0.1"
+description = "Development tooling for the BLE Mesh Lights Home Assistant integration"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+# The Home Assistant suite needs its own environment (requirements-test-ha.txt):
+#   pytest tests/ha -o addopts=""
+addopts = "--ignore=tests/ha"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# Vendored ESPHome component: keeps upstream (ESPHome) style.
+extend-exclude = ["esphome/components"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# Script-local helper modules of tests/ and tools/.
+known-local-folder = ["_load", "_package", "air"]

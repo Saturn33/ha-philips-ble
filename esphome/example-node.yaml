@@ -1,0 +1,65 @@
+# Example node: a Seeed XIAO ESP32-C3 as a Bluetooth proxy that can also send
+# commands to Bluetooth Mesh lights.
+#
+# Keep the two "v0.1.0" references below equal: the package and the component
+# must come from the same release.
+#
+# Copy secrets.yaml.example to secrets.yaml and fill in api_key, wifi_ssid,
+# wifi_password and fallback_password. Full guide: README.md in this folder.
+
+esphome:
+  name: ble-proxy-tx-kitchen
+  friendly_name: BLE Proxy TX (Kitchen)
+  min_version: 2026.4.5
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+# The XIAO ESP32-C3 has no on-board antenna: connect the U.FL antenna before powering it.
+
+logger:
+  logs:
+    esp32_ble_tracker: INFO
+    bluetooth_proxy: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    # Encrypted with the API key.
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "BLE Proxy TX Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+bluetooth_proxy:
+  # GATT connections for other Bluetooth devices; set false if the board only serves lights.
+  active: true
+
+packages:
+  ble_adv_tx: github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@v0.1.0
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/Saturn33/ha-philips-ble
+      ref: v0.1.0
+      path: esphome/components
+    components: [ble_adv_proxy]
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: Wi-Fi signal
+    update_interval: 60s

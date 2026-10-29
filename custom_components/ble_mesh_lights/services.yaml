@@ -1,0 +1,46 @@
+set_assumed_state:
+  target:
+    entity:
+      integration: ble_mesh_lights
+      domain: light
+  fields:
+    "on":
+      selector:
+        boolean:
+    color_temp_kelvin:
+      selector:
+        color_temp:
+          unit: kelvin
+          min: 2200
+          max: 6500
+    brightness:
+      selector:
+        number:
+          min: 0
+          max: 255
+
+send_command:
+  target:
+    entity:
+      integration: ble_mesh_lights
+      domain: light
+  fields:
+    command:
+      required: true
+      example: relax
+      selector:
+        text:
+
+skip_sequence:
+  target:
+    entity:
+      integration: ble_mesh_lights
+      domain: light
+  fields:
+    amount:
+      default: 1048576
+      selector:
+        number:
+          min: 1
+          max: 8388608
+          mode: box

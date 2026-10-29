@@ -1,0 +1,41 @@
+# ble-adv-tx: turns an ESPHome Bluetooth proxy into one that can also send raw
+# BLE adverts, which Bluetooth Mesh lights such as the Philips Valen need.
+# Include it from a node with `packages:` and load the ble_adv_proxy component
+# with `external_components:` (see example-node.yaml). The node keeps its own
+# board, Wi-Fi, API key and bluetooth_proxy settings.
+
+substitutions:
+  # Raise with every change to this package or to components/ble_adv_proxy.
+  # The integration compares it with the version it needs.
+  ble_adv_tx_version: "1"
+
+api:
+  # ble_adv_proxy registers its actions (adv_svc_v1, setup_svc_v0) as custom services.
+  custom_services: true
+  # Received mesh adverts reach Home Assistant as esphome.ble_adv.raw_adv events.
+  homeassistant_services: true
+
+wifi:
+  # Roaming every five minutes breaks the API connection for up to about 45 s.
+  post_connect_roaming: false
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Listen all the time: a remote press is a single burst of 1-3 ms.
+    interval: 1100ms
+    window: 1100ms
+    active: true
+
+ble_adv_proxy:
+  use_max_tx_power: true
+  # Stop the scan while our adverts go out: on a single-radio ESP32-C3 a
+  # continuous scan lets only about 6 of 10 commands reach the light.
+  pause_scan_on_send: true
+
+text_sensor:
+  - platform: template
+    name: BLE TX package
+    id: ble_adv_tx_package_version
+    icon: mdi:chip
+    entity_category: diagnostic
+    lambda: return {"${ble_adv_tx_version}"};

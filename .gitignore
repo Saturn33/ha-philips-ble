@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.ruff_cache/
+
+# ESPHome: real secrets and build output (the CI placeholder .github/esphome/secrets.yaml is kept)
+/secrets.yaml
+/esphome/secrets.yaml
+# Your own board nodes, copied from example-node.yaml or local-node.yaml
+/esphome/ble-proxy-tx-*.yaml
+# Written by ESPHome on the first build in this folder (its rules are already above)
+/esphome/.gitignore
+.esphome/
+
+# Node
+node_modules/
+
+# Research tools: sequence counters and raw air captures (neighbours' devices)
+tools/state/
+captures/
+
+# Dev deploy settings (HA address and token)
+tools/deploy.env
+
+# Agent workspaces
+.superpowers/

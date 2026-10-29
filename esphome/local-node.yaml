@@ -1,0 +1,61 @@
+# The example node built from this checkout of the repository (no GitHub release needed):
+# for development, and until the first release exists.
+#
+# Copy it next to this file under the board's name (cp local-node.yaml ble-proxy-tx-<place>.yaml),
+# rename the node inside, and build from this folder. Secrets: secrets.yaml in this folder
+# (copy secrets.yaml.example). Full guide: README.md in this folder.
+
+esphome:
+  name: ble-proxy-tx-kitchen
+  friendly_name: BLE Proxy TX (Kitchen)
+  min_version: 2026.4.5
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+# The XIAO ESP32-C3 has no on-board antenna: connect the U.FL antenna before powering it.
+
+logger:
+  logs:
+    esp32_ble_tracker: INFO
+    bluetooth_proxy: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    # Encrypted with the API key.
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "BLE Proxy TX Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+bluetooth_proxy:
+  # GATT connections for other Bluetooth devices; set false if the board only serves lights.
+  active: true
+
+packages:
+  ble_adv_tx: !include ble-adv-tx.yaml
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ble_adv_proxy]
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: Wi-Fi signal
+    update_interval: 60s
