@@ -47,7 +47,7 @@ if [ "$sync" = rsync ]; then
     rsync -a --delete --exclude=__pycache__ -e "ssh -p $port" "$src" "$HA_SSH:$dest/"
 else
     tar -C "$src" --exclude=__pycache__ -cf - . |
-        ssh -p "$port" "$HA_SSH" "rm -rf $dest && mkdir -p $dest && tar -C $dest -xf -"
+        ssh -p "$port" "$HA_SSH" "rm -rf '$dest' && mkdir -p '$dest' && tar -C '$dest' -xf -"
 fi
 
 if [ "$restart" = 1 ]; then

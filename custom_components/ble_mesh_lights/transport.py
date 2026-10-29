@@ -10,13 +10,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.components import bluetooth
-from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import IGNORED_DURATION, PACKAGE_SENSOR_NAME, PACKAGE_SENSOR_OBJECT_ID
+from .const import (
+    HEARTBEAT_PACKAGE_VERSION,
+    IGNORED_DURATION,
+    PACKAGE_SENSOR_NAME,
+    PACKAGE_SENSOR_OBJECT_ID,
+)
 
 ESPHOME = "esphome"
 
@@ -59,48 +64,51 @@ async def async_boards(hass: HomeAssistant, device_ids: list[str]) -> list[Board
     return boards
 
 
-def package_sensor(hass: HomeAssistant, board: Board) -> str | None:
-    """Entity id of the board's "BLE TX package" sensor."""
-    for entity in er.async_entries_for_device(er.async_get(hass), board.device_id):
+def _package_entity(hass: HomeAssistant, board: Board) -> er.RegistryEntry | None:
+    for entity in er.async_entries_for_device(
+        er.async_get(hass), board.device_id, include_disabled_entities=True
+    ):
         if entity.domain == "sensor" and (
             entity.unique_id.endswith(PACKAGE_SENSOR_OBJECT_ID) or entity.original_name == PACKAGE_SENSOR_NAME
         ):
-            return entity.entity_id
+            return entity
     return None
 
 
+def package_sensor(hass: HomeAssistant, board: Board) -> str | None:
+    """Entity id of the board's "BLE TX package" sensor (also when it is disabled)."""
+    entity = _package_entity(hass, board)
+    return entity.entity_id if entity else None
+
+
+def package_sensor_disabled(hass: HomeAssistant, board: Board) -> bool:
+    """The sensor exists but the user disabled it: then there is no version and no heartbeat."""
+    entity = _package_entity(hass, board)
+    return entity is not None and entity.disabled
+
+
 def package_version(hass: HomeAssistant, board: Board) -> str | None:
-    """The package version the board reports, or None while it is not connected."""
+    """The package version the board reports, or None while it is not connected or has not
+    reported yet: before a sensor's first publish ESPHome sends missing_state and HA shows
+    `unknown` (components/esphome/sensor.py, native_value)."""
     entity_id = package_sensor(hass, board)
     state = hass.states.get(entity_id) if entity_id else None
-    if state is None or state.state == STATE_UNAVAILABLE:
+    if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return None
     return state.state
 
 
-# A board's Bluetooth proxy forwards adverts many times a second; this long without one, the board
-# is taken as gone even though HA has not noticed the lost connection yet (that can take a minute,
-# and a command sent meanwhile is lost without an error).
-SCANNER_SILENT_LIMIT = 15.0
-
-
 def board_ready(hass: HomeAssistant, board: Board) -> bool:
-    if not hass.services.has_service(ESPHOME, board.service) or package_version(hass, board) is None:
-        return False
-    silent = scanner_silent_for(hass, board)
-    return silent is None or silent < SCANNER_SILENT_LIMIT
+    """The action exists and the package sensor is available. (The hub adds the heartbeat.)"""
+    return hass.services.has_service(ESPHOME, board.service) and package_version(hass, board) is not None
 
 
-def _scanner_silent_for(hass: HomeAssistant, board: Board) -> float | None:
-    """Seconds since the board's Bluetooth scanner last reported an advert; None without a scanner."""
-    for source, device_id in _board_by_scanner_source(hass).items():
-        if device_id == board.device_id:
-            scanner = bluetooth.async_scanner_by_source(hass, source)
-            return None if scanner is None else scanner.time_since_last_detection()
-    return None
-
-
-scanner_silent_for = _scanner_silent_for
+def has_heartbeat(hass: HomeAssistant, board: Board) -> bool:
+    """The board's package fires the heartbeat event (version 2 or later)."""
+    try:
+        return int(package_version(hass, board) or "0") >= HEARTBEAT_PACKAGE_VERSION
+    except ValueError:
+        return False  # an unknown version: the repair says so, no heartbeat is expected
 
 
 async def async_setup_receiver(hass: HomeAssistant, board: Board) -> None:

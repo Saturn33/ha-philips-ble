@@ -101,7 +101,9 @@ def test_unknown_power_makes_relative_commands_uncertain(valen):
 @pytest.mark.parametrize(
     ("current", "requested", "expected"),
     [
-        (50, 60, 80),  # a little up from a step: the next step up
+        (50, 60, 80),  # a little up from a step: the nearest is the current one, so one step up
+        (50, 85, 80),  # a larger request: the nearest step, not one beyond it
+        (10, 40, 30),
         (50, 95, 100),
         (50, 50, 50),  # exactly a step: that step
         (50, 80, 80),
@@ -113,7 +115,7 @@ def test_unknown_power_makes_relative_commands_uncertain(valen):
         (None, 60, 50),  # current unknown: the nearest step
     ],
 )
-def test_snap_level_moves_in_the_direction_of_the_change(valen, current, requested, expected):
+def test_snap_level(valen, current, requested, expected):
     assert state.snap_level(valen, requested, current) == expected
 
 
@@ -122,11 +124,12 @@ def test_snap_level_moves_in_the_direction_of_the_change(valen, current, request
     [
         (3000, 3100, 4000),
         (3000, 2900, 2700),
+        (2200, 3300, 3000),  # nearest in mireds
         (3000, 3000, 3000),
         (2200, 2000, 2200),
         (6500, 7000, 6500),
         (None, 3300, 3000),
     ],
 )
-def test_snap_color_temp_moves_in_the_direction_of_the_change(valen, current, requested, expected):
+def test_snap_color_temp(valen, current, requested, expected):
     assert state.snap_color_temp(valen, requested, current) == expected

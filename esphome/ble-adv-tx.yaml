@@ -7,7 +7,7 @@
 substitutions:
   # Raise with every change to this package or to components/ble_adv_proxy.
   # The integration compares it with the version it needs.
-  ble_adv_tx_version: "1"
+  ble_adv_tx_version: "2"
 
 api:
   # ble_adv_proxy registers its actions (adv_svc_v1, setup_svc_v0) as custom services.
@@ -39,3 +39,15 @@ text_sensor:
     icon: mdi:chip
     entity_category: diagnostic
     lambda: return {"${ble_adv_tx_version}"};
+
+# The board's heartbeat. Home Assistant notices a lost API connection only after up to a minute,
+# and an action called meanwhile is lost without an error; with this event every 10 s the
+# integration stops using a silent board after about 35 s. (A re-sent unchanged sensor value would
+# not do: HA's ESPHome integration drops it.)
+interval:
+  - interval: 10s
+    then:
+      - homeassistant.event:
+          event: esphome.ble_adv_tx.heartbeat
+          data:
+            version: ${ble_adv_tx_version}

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -62,7 +63,13 @@ class PairingRules:
     requests: int
     interval: float
     after_power_on: bool
-    reset_hint: str
+    reset_hint: Mapping[str, str]  # language → text; "en" always present
+    remote_hint: Mapping[str, str]
+
+    def hint(self, kind: str, language: str) -> str:
+        """The "reset" or "remote" hint in this language, else in English."""
+        texts = self.reset_hint if kind == "reset" else self.remote_hint
+        return texts.get(language, texts["en"])
 
 
 @dataclass(frozen=True)
@@ -134,6 +141,16 @@ class _Reader:
         if length is not None and len(value) != length:
             raise self.fail(f"{where}{key}", f"expected {length} bytes")
         return value
+
+
+def _hint(reader: _Reader, pairing: Mapping[str, Any], key: str) -> Mapping[str, str]:
+    """A text for the wizard: one string (English), or one per language with "en" among them."""
+    value = reader.get(pairing, key, (str, Mapping), "pairing.")
+    if isinstance(value, str):
+        return MappingProxyType({"en": value})
+    if "en" not in value or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+        raise reader.fail(f"pairing.{key}", 'expected texts by language, with "en"')
+    return MappingProxyType(dict(value))
 
 
 def _template(reader: _Reader, name: str, template: str) -> str:
@@ -252,7 +269,8 @@ def load_profile(path: Path) -> Profile:
         requests=reader.get(pairing, "requests", int, "pairing."),
         interval=float(reader.get(pairing, "interval", (int, float), "pairing.")),
         after_power_on=reader.get(pairing, "after_power_on", bool, "pairing."),
-        reset_hint=reader.get(pairing, "reset_hint", str, "pairing."),
+        reset_hint=_hint(reader, pairing, "reset_hint"),
+        remote_hint=_hint(reader, pairing, "remote_hint"),
     )
     if pairing_rules.requests <= 0 or pairing_rules.interval <= 0:
         raise reader.fail("pairing", "requests and interval must be positive")

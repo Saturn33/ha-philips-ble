@@ -11,6 +11,13 @@ A stock ESPHome Bluetooth proxy only listens. The package adds:
 - **Continuous listening** (scan window = interval = 1100 ms), because a remote press is a single burst of 1 to 3 ms.
 - **`post_connect_roaming: false`.** Wi-Fi roaming every five minutes would cut the Home Assistant connection for up to 45 s.
 - **A diagnostic sensor, "BLE TX package"**, with the package version. The integration compares it with the version it needs and raises a repair issue when the board needs new firmware.
+- **A heartbeat** (from version 2): the event `esphome.ble_adv_tx.heartbeat` every 10 s. The integration stops sending through a board whose last heartbeat is older than about 35 s. Without it, Home Assistant notices an unplugged board only after up to a minute, and commands sent through it meanwhile are lost. The recorder stores these events like any other; to leave them out of the database, add to `configuration.yaml`:
+  ```yaml
+  recorder:
+    exclude:
+      event_types:
+        - esphome.ble_adv_tx.heartbeat
+  ```
 
 Everything else keeps working as on any Bluetooth proxy: BTHome sensors, Xiaomi thermometers with custom firmware and other passive devices reach Home Assistant through the same board.
 
@@ -73,7 +80,7 @@ The first build downloads the ESP-IDF toolchain (about 1 GB) and takes 10–20 m
 ## Add the board to Home Assistant
 
 1. Home Assistant finds the board by itself (Settings → Devices & services → Discovered → ESPHome); otherwise add the ESPHome integration with the board's IP and port 6053. Enter the `api_key`.
-2. Check the board's diagnostic sensor **BLE TX package**: it shows the package version (`1` for this release).
+2. Check the board's diagnostic sensor **BLE TX package**: it shows the package version (`2` for this release).
 3. Reserve the board's IP address in your router (DHCP reservation). Home Assistant would find the board again by name, but OTA updates and tools from other machines (for example WSL, which cannot resolve `.local` names) use the IP.
 
 The board is now ready to be chosen in the BLE Mesh Lights integration.
@@ -89,4 +96,6 @@ The ESPHome option **Allow the device to perform Home Assistant actions** is not
 | No Wi-Fi, no Bluetooth, nothing in the logs about scanning | The antenna is not connected (XIAO ESP32-C3). |
 | An over-the-air update stops at about 50 % | The radio is busy listening. Retry once; if it fails again, flash over USB. |
 | A capture tool gets no adverts | Another API client (usually Home Assistant) holds the advert stream: only one client can receive it. |
+| A board counts as not connected although it is online | Its **BLE TX package** sensor must be enabled, and on package version 2 the heartbeat must arrive: Developer tools → Events, listen to `esphome.ble_adv_tx.heartbeat`, one event about every 10 s per board. |
+| The board's log shows `event 'esphome.ble_adv_tx.heartbeat' dropped` every 10 s | Expected while Home Assistant is not connected to the board (no API client to send the heartbeat to). It stops once Home Assistant connects. |
 | Remote presses never reach Home Assistant | Check that the board is connected (its **BLE TX package** sensor is not unavailable). The integration asks the board to forward presses each time it connects; reloading the BLE Mesh Lights entry asks again. |

@@ -48,3 +48,59 @@ A light keeps advertising for about 7 s after it is switched off at the wall, an
 **Why it stays:** nothing in the air tells a short cycle apart from no cycle at all; the adverts before and after are the same.
 
 **When it matters:** after a quick flick of the switch, HA shows the light in its previous state while it is at 3000 K / 100 %. Pick a scene, or use the action "Set assumed state", to bring HA back in line. A physical switch that is part of the automation (a smart relay) could report the cycle instead.
+
+## A board's Wi-Fi drop marks active-mode lights uncertain
+
+A light in active mode (the first 30 minutes after it gets power) is watched for silences of the "Short power cut detection" threshold (3 s). If the only board that hears it loses Wi-Fi or reconnects to Home Assistant for that long, the silence looks the same as a quick switch cycle, and "State uncertain" turns on although nothing happened to the light.
+
+**Why it stays:** the integration cannot tell a silent light from a silent board within a few seconds; the board's heartbeat comes every 10 s.
+
+**When it matters:** a board with a weak Wi-Fi signal. Pick a scene to clear the flag, improve the board's Wi-Fi, or raise the threshold in the options.
+
+## Commands sent just after a board is unplugged are lost
+
+For up to about 35 s after a board loses power or Wi-Fi, its heartbeat is not yet overdue, so commands still go through it. The board's action is accepted without an error, the commands never reach the air, and Home Assistant applies them to the light's state anyway.
+
+**Why it stays:** nothing tells sooner that the board is gone (Home Assistant itself notices the lost connection only after up to a minute).
+
+**When it matters:** if a light did not follow a command right after a board was unplugged, use "Set assumed state" or pick a scene. A second board that hears the light takes over after about 35 s.
+
+## A missed remote press leaves the state wrong without "State uncertain"
+
+A remote press is a single burst of 1–3 ms, and some are lost on the air (about 85 % were caught in the research). A missed relative press (brightness up/down) shows up at the next press as a gap in the remote's sequence and marks the state uncertain. A missed absolute press (a scene, select, on or off) is not noticed until the next press of that remote: until then Home Assistant shows the previous state as certain.
+
+**Why it stays:** the light reports nothing; only the remote's next message reveals the gap.
+
+**When it matters:** after a press that Home Assistant did not follow, press the button again or correct the state. A second board in another place catches more presses.
+
+## The 24-bit message counter can run out
+
+Each lamp's sender address has a 24-bit counter (16.7 million messages). Normal use takes many years, but "Skip sequence forward" jumps 1,048,576 each time, and the repair for lost counters starts at 8,388,608. Repeated skips or repairs can exhaust the space, after which the lamp refuses to send.
+
+**Why it stays:** a counter must never go back, and the light remembers the highest value per address.
+
+**When it matters:** when sending fails with "Sequence space … is exhausted". Delete the lamp, factory-reset the light (five quick switch cycles) and add it again: it gets a new address with a fresh counter.
+
+## Outage restore is simple until the outage detector
+
+With an outage sensor in the options and a lamp set to "Restore previous state": when the sensor turns on (from any other state), or is `on` at the integration's start with a `last_changed` under 10 minutes old, every such lamp that comes back within 10 minutes is driven to the state it had before. Three review rounds tried to cover more cases and each broke neighbouring ones; without a real outage sensor nothing could be checked live. Known gaps, as input for the redesign:
+
+- A second HA restart, or a reload of the entry, within 10 minutes of an outage restores again — from the assumed power-on state (3000 K, 100 %), although the lamps did not lose power that time (HA keeps no `last_changed` across a restart).
+- A sensor whose device drops off the network and comes back `on` counts as a new outage.
+- A sensor that stays `on` (for example "mains present") makes every HA restart an outage.
+- A reload drops the pending restores of lamps that are not back yet.
+- A restore uses relative commands from the assumed power-on state, so a lamp that did not lose power ends up at a wrong level.
+- The sensor must turn on before the lamps are seen back. A lamp seen back first is taken as plainly powered on (3000 K, 100 %), and a later `on` of the sensor restores nothing. A sensor that reports only after the lamps are back (for example a Wi-Fi or Zigbee device that boots with the mains) makes the option useless while HA keeps running; it works when HA itself restarts after the outage.
+
+**Why it stays:** the outage detector (a separate integration, planned) decides how the sensor behaves. The redesign comes with it: first a table of all cases (sensor states and transitions × HA starting / running / entry reload × the sensor reporting before or after the lamps are back), agreed and reviewed before any code, then a test per row that simulates a real HA start.
+
+**When it matters:** use the option only with a sensor that turns on when mains power comes back, before the lamps are back, and turns off again afterwards (a pulse), or leave the lamps at "Do nothing".
+
+
+## The wizard's reset and remote hints follow the server language
+
+The factory-reset hint and the remote's pairing steps come from the lamp's profile and are filled into the wizard's text by the server, in Home Assistant's server language (Settings → System → General). The rest of the wizard follows each user's profile language. With the two languages different, the hints show in the other language: for example English steps inside the Russian "Pair again" and remote screens. A flow does not know which user opened it, so the server cannot pick the user's language.
+
+**Why it stays:** the fix (a set of translated step variants per profile) is planned for the next version; 0.2.0 has one profile.
+
+**When it matters:** users whose profile language differs from the server language. Until then, set both to the same language.

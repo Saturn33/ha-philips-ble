@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceEntry
@@ -62,6 +62,8 @@ async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: BleMeshLightsConfigEntry, device: DeviceEntry
 ) -> bool:
     """A remote's device can be deleted (the remote is forgotten); a lamp is deleted as a subentry."""
+    if entry.state is not ConfigEntryState.LOADED:
+        return False
     for domain, identifier in device.identifiers:
         if domain == DOMAIN and identifier.startswith("remote_"):
             await entry.runtime_data.async_remove_remote(

@@ -187,16 +187,183 @@ async def test_scene_clears_uncertainty(hass, fake_board, hass_storage):
     assert hub.lamps[l1].state == LampState(True, 2700, 50, "relax")
 
 
-async def test_silent_board_is_skipped(hass, make_board, hass_storage, fake_air):
-    """Unplugged, but HA has not noticed yet (its sensor still looks fine): the board's scanner has
-    gone quiet, so commands go through the other board instead of being lost."""
+async def test_unload_waits_for_a_running_chain(hass, fake_board, hass_storage):
+    """The command on the air when the entry unloads finishes, and the saved state includes it."""
+    from custom_components.ble_mesh_lights.const import STORAGE_STATE
+    from custom_components.ble_mesh_lights.state import apply
+
+    entry, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    start = LampState(True, 3000, 100)
+    hub.set_assumed_state(l1, start)
+    chain = asyncio.ensure_future(hub.async_set_target(l1, Target(True, 2200, 5)))
+    await wait_for(lambda: len(fake_board.sent) >= 1)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await chain
+    sent = len(fake_board.sent)
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert len(fake_board.sent) == sent  # nothing after the unload
+    expected = start
+    for _, _, name in _sent(fake_board):
+        expected = apply(VALEN, expected, name)
+    stored = hass_storage[STORAGE_STATE]["data"]["lamps"][l1]
+    assert (stored["on"], stored["color_temp"], stored["level"]) == (
+        expected.on,
+        expected.color_temp,
+        expected.level,
+    )
+
+
+async def test_superseded_chain_sends_nothing_after_its_wait(hass, fake_board, hass_storage, fake_clock):
+    """A chain waiting out the command interval when a newer request comes sends nothing more."""
+    from custom_components.ble_mesh_lights.state import apply
+
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    start = LampState(True, 3000, 100)
+    hub.set_assumed_state(l1, start)
+    first_target, second_target = Target(True, 2200, 5), Target(True, 6500, 100)
+    first = asyncio.ensure_future(hub.async_set_target(l1, first_target))
+    await wait_for(lambda: len(fake_board.sent) >= 1)
+    await hub.async_set_target(l1, second_target)
+    await first
+    first_command = plan(VALEN, start, first_target)[0]
+    expected = [first_command, *plan(VALEN, apply(VALEN, start, first_command), second_target)]
+    assert [name for _, _, name in _sent(fake_board)] == expected
+
+
+async def test_closed_hub_refuses_to_send(hass, fake_board, hass_storage):
+    from custom_components.ble_mesh_lights.const import STORAGE_SEQUENCE
+    from custom_components.ble_mesh_lights.hub import HubClosed
+
+    entry, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    stored = dict(hass_storage[STORAGE_SEQUENCE]["data"]["addresses"])
+    with pytest.raises(HubClosed):
+        await hub.async_power(l1, True)
+    assert fake_board.sent == []
+    assert hass_storage[STORAGE_SEQUENCE]["data"]["addresses"] == stored
+
+
+async def test_board_on_package_1_still_sends(hass, make_board, hass_storage, freezer):
+    from datetime import timedelta
+
+    board = make_board(version="1")
+    _, hub, l1 = await _setup(hass, [board], hass_storage)
+    freezer.tick(timedelta(minutes=5))  # package 1 reports once a minute or less: no heartbeat check
+    await hub.async_power(l1, True)
+    assert len(board.sent) == 1
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"board_outdated_{board.device_id}") is not None
+
+
+async def test_set_assumed_state_stops_a_running_chain(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))
+    chain = asyncio.ensure_future(hub.async_set_target(l1, Target(True, 2200, 5)))
+    await wait_for(lambda: len(fake_board.sent) >= 1)
+    hub.set_assumed_state(l1, LampState(True, 4000, 80))  # the user corrects HA's idea of the lamp
+    await chain
+    assert len(fake_board.sent) <= 2  # the command on the air finishes, nothing after it
+    assert hub.lamps[l1].state == LampState(True, 4000, 80)
+
+
+async def _beats(hass, fake_clock, boards, seconds, step=10.0):
+    for _ in range(int(seconds / step)):
+        fake_clock.now += step
+        for board in boards:
+            board.beat()
+    await hass.async_block_till_done()
+
+
+async def test_beating_board_stays_ready(hass, make_board, hass_storage, fake_clock):
+    """An hour with no commands and no BLE traffic around: the heartbeat keeps the board in use."""
+    board = make_board()
+    _, hub, l1 = await _setup(hass, [board], hass_storage)
+    await _beats(hass, fake_clock, [board], 3600)
+    await hub.async_power(l1, True)
+    assert len(board.sent) == 1
+
+
+async def test_board_without_heartbeat_is_skipped(hass, make_board, hass_storage, fake_air, fake_clock):
+    """Unplugged, but HA has not noticed the lost connection yet: after 25 s without a heartbeat
+    the other board is used."""
     kitchen = make_board()
     street = make_board("ble-proxy-tx-street", "BLE Proxy TX (Street)")
     _, hub, l1 = await _setup(hass, [kitchen, street], hass_storage)
     fake_air.rssi[L1] = {kitchen.device_id: -45, street.device_id: -74}
     await hub.async_power(l1, True)
     assert (len(kitchen.sent), len(street.sent)) == (1, 0)
-    kitchen.silent = 20.0
+    kitchen.beating = False  # unplugged: no heartbeat, its sensor still looks fine
+    await _beats(hass, fake_clock, [street], 40)
     await hub.async_power(l1, False)
     assert (len(kitchen.sent), len(street.sent)) == (1, 1)
-    assert hub.lamps[l1].board == street.device_id
+    # Plugged back in: it beats again, and once the lamp's board rules allow (30 s on one board,
+    # 6 dB better) the lamp moves back to the board that hears it best.
+    kitchen.beating = True
+    active = bytes.fromhex("182b0000ffffffff3101ad6554cf26e8000001000000000000")
+    for _ in range(40):
+        fake_clock.now += 1
+        fake_air.beacon(L1, active, fake_clock.now)
+        hub.presence_tick()
+    await hub.async_power(l1, True)
+    assert (len(kitchen.sent), len(street.sent)) == (2, 1)
+
+
+async def test_new_board_has_time_for_its_first_beat(hass, make_board, hass_storage, fake_clock):
+    board = make_board()
+    board.beating = False
+    _, hub, l1 = await _setup(hass, [board], hass_storage)
+    await hub.async_power(l1, True)  # no beat yet, just set up
+    assert len(board.sent) == 1
+    fake_clock.now += 36
+    with pytest.raises(HomeAssistantError):
+        await hub.async_power(l1, False)
+
+
+async def test_sensor_updates_are_no_heartbeat(hass, make_board, hass_storage, fake_clock):
+    """Round 1 used the sensor's last_reported; HA's ESPHome integration drops unchanged states,
+    so re-written sensor states must not count."""
+    board = make_board()
+    board.beating = False
+    _, hub, l1 = await _setup(hass, [board], hass_storage)
+    for _ in range(4):  # 40 s, past the 35 s timeout
+        fake_clock.now += 10
+        hass.states.async_set(board.version_entity_id, board.version)
+    with pytest.raises(HomeAssistantError):
+        await hub.async_power(l1, True)
+
+
+async def test_chain_superseded_while_waiting_for_the_board_sends_nothing(hass, fake_board, hass_storage):
+    """Two lamps on one board: lamp B's chain waits for the board while A sends. B is re-targeted
+    meanwhile, so B's old command must not go out once the board is free."""
+    lamps = [lamp_subentry(), lamp_subentry("Hall", mac="E8:26:CF:00:00:02", address=0x7E02, index=2)]
+    entry = await setup_entry(hass, [fake_board], lamps=lamps, hass_storage=hass_storage)
+    hub = entry.runtime_data
+    ids = {sub.title: sub_id for sub_id, sub in entry.subentries.items()}
+    street, hall = ids["Street"], ids["Hall"]
+    hub.set_assumed_state(hall, LampState(True, 3000, 100))
+    fake_board.hold = asyncio.Event()
+    a = asyncio.ensure_future(hub.async_power(street, True))
+    await wait_for(lambda: hub._board_locks and next(iter(hub._board_locks.values())).locked())
+    b_old = asyncio.ensure_future(hub.async_command(hall, "relax"))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    b_new = asyncio.ensure_future(hub.async_power(hall, False))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    fake_board.hold.set()
+    await asyncio.gather(a, b_old, b_new)
+    sent = [(source, name) for source, _, name in _sent(fake_board)]
+    assert sent == [(0x7E01, "on"), (0x7E02, "off")]
+
+
+async def test_two_missed_heartbeats_keep_the_board(hass, make_board, hass_storage, fake_clock):
+    """Beats every 10 s, timeout 35 s: two lost beats in a row do not drop the board."""
+    board = make_board()
+    board.beating = False
+    _, hub, l1 = await _setup(hass, [board], hass_storage)
+    fake_clock.now += 30
+    await hub.async_power(l1, True)
+    assert len(board.sent) == 1
+    fake_clock.now += 6
+    with pytest.raises(HomeAssistantError):
+        await hub.async_power(l1, False)

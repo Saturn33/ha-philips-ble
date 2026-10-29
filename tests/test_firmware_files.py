@@ -31,8 +31,14 @@ def test_package_settings():
     assert package["wifi"]["post_connect_roaming"] is False
     assert package["api"]["custom_services"] is True
     assert package["api"]["homeassistant_services"] is True
-    assert package["substitutions"]["ble_adv_tx_version"] == "1"
-    assert any(sensor.get("name") == "BLE TX package" for sensor in package["text_sensor"])
+    assert package["substitutions"]["ble_adv_tx_version"] == "2"
+    (sensor,) = [sensor for sensor in package["text_sensor"] if sensor.get("name") == "BLE TX package"]
+    assert "update_interval" not in sensor  # HA drops unchanged ESPHome states: no heartbeat there
+    # The heartbeat: an event every 10 s (HA puts every ESPHome event on the bus).
+    (beat,) = package["interval"]
+    assert beat["interval"] == "10s"
+    (action,) = beat["then"]
+    assert action["homeassistant.event"]["event"] == "esphome.ble_adv_tx.heartbeat"
 
 
 def test_component_has_pause_fix():

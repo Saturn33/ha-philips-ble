@@ -105,29 +105,63 @@ async def test_own_send_heard_by_another_board_is_no_collision(hass, make_board,
     assert ir.async_get(hass).async_get_issue(DOMAIN, "address_collision_7e01") is None
 
 
-async def test_wait_for_pairing_returns_source(hass, fake_board, hass_storage):
+async def test_wait_for_remote_press_skips_pairing_and_late(hass, fake_board, hass_storage):
     _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
-    waiter = asyncio.ensure_future(hub.async_wait_for_pairing(hub.lamps[l1].profile, timeout=5))
+    waiter = asyncio.ensure_future(hub.async_wait_for_remote_press(hub.lamps[l1].profile, timeout=5))
     await asyncio.sleep(0)
     await _press(hass, fake_board, "pairing", 0x13B3, 120)
-    assert await waiter == 0x13B3
-    # The wizard took the request: no "new remote" issue for it.
+    assert not waiter.done()
+    await _press(hass, fake_board, "relax", 0x13B3, 130)
+    assert await waiter == (R2, "relax")
+
+
+async def test_press_taken_by_the_wizard_raises_no_repair(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    waiter = asyncio.ensure_future(hub.async_wait_for_remote_press(hub.lamps[l1].profile, timeout=5))
+    await asyncio.sleep(0)
+    await _press(hass, fake_board, "relax", 0x13B3, 130)
+    assert await waiter == (R2, "relax")
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"new_remote_{R2}") is None
 
 
-async def test_wait_for_pairing_times_out(hass, fake_board, hass_storage):
+async def test_wait_for_remote_press_skips_a_late_press(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    await _press(hass, fake_board, "on", 0x13B3, 130)
+    waiter = asyncio.ensure_future(hub.async_wait_for_remote_press(hub.lamps[l1].profile, timeout=5))
+    await asyncio.sleep(0)
+    await _press(hass, fake_board, "off", 0x13B3, 120)  # older than the last one: late
+    assert not waiter.done()
+    await _press(hass, fake_board, "bright", 0x13B3, 140)
+    assert await waiter == (R2, "bright")
+
+
+async def test_wait_for_remote_press_times_out(hass, fake_board, hass_storage):
     _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
     with pytest.raises(TimeoutError):
-        await hub.async_wait_for_pairing(hub.lamps[l1].profile, timeout=0.01)
+        await hub.async_wait_for_remote_press(hub.lamps[l1].profile, timeout=0.01)
 
 
-async def test_wait_for_press_returns_command(hass, fake_board, hass_storage):
-    _, hub, _ = await _setup(hass, [fake_board], hass_storage)
-    waiter = asyncio.ensure_future(hub.async_wait_for_press(R2, timeout=5))
-    await asyncio.sleep(0)
-    await _press(hass, fake_board, "pairing", 0x13B3, 120)
-    await _press(hass, fake_board, "relax", 0x13B3, 130)
-    assert await waiter == "relax"
+async def test_add_remote_lamp_keeps_other_lamps(hass, fake_board, hass_storage):
+    entry = await setup_entry(
+        hass,
+        [fake_board],
+        lamps=[
+            lamp_subentry(),
+            lamp_subentry(mac="E8:26:CF:00:00:02", address=0x7E02, index=2, title="Patio"),
+        ],
+        hass_storage=hass_storage,
+    )
+    hub = entry.runtime_data
+    l1, l2 = entry.subentries
+    await _press(hass, fake_board, "on", 0x37AF, 2280)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"new_remote_{R1}") is not None
+    await hub.async_add_remote_lamp(R1, l1)
+    await hub.async_add_remote_lamp(R1, l2)
+    await hub.async_add_remote_lamp(R1, l2)
+    assert hub.remotes[R1].lamps == [l1, l2]
+    assert hub.remote_lamp_names(R1) == ["Street", "Patio"]
+    assert hub.remote_lamp_names(R2) == []
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"new_remote_{R1}") is None
 
 
 async def test_tracker_baselines_survive_restart(hass, fake_board, hass_storage):

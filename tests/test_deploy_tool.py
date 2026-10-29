@@ -63,7 +63,7 @@ def test_falls_back_to_tar_over_ssh(fake):
     assert result.returncode == 0, result.stderr
     assert not any(line.startswith("rsync ") for line in lines)
     assert lines[0].startswith("ssh -p 2222 root@ha.example ")
-    assert f"rm -rf {DEST}" in lines[0] and "tar -C" in lines[0]
+    assert f"rm -rf '{DEST}'" in lines[0] and "tar -C" in lines[0]
 
 
 def test_no_restart(fake):
@@ -92,3 +92,9 @@ def test_settings_file_is_not_committed():
     assert "tools/deploy.env" in (ROOT / ".gitignore").read_text().splitlines()
     example = (ROOT / "tools" / "deploy.env.example").read_text()
     assert "HA_SSH=" in example and "HA_TOKEN=" in example
+
+
+def test_deploy_quotes_the_destination(fake):
+    result, lines = _run(fake, DEPLOY_SYNC="tar")
+    assert result.returncode == 0, result.stderr
+    assert f"rm -rf '{DEST}'" in lines[0] and f"mkdir -p '{DEST}'" in lines[0]

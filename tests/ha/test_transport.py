@@ -90,21 +90,3 @@ async def test_discovered_beacons(hass, monkeypatch):
     ]
     monkeypatch.setattr(bluetooth, "async_discovered_service_info", lambda hass, connectable: infos)
     assert transport.discovered_beacons(hass) == [(L1, b"\x02\x01\x06", 10.0)]
-
-
-async def test_scanner_silent_for(hass, fake_board, monkeypatch):
-    from custom_components.ble_mesh_lights import transport as real
-
-    (board,) = await transport.async_boards(hass, [fake_board.device_id])
-    MockConfigEntry(
-        domain="bluetooth",
-        unique_id="B0:A6:04:4D:82:ED",
-        data={"source": "B0:A6:04:4D:82:ED", "source_domain": "esphome", "source_device_id": board.device_id},
-    ).add_to_hass(hass)
-    scanner = SimpleNamespace(time_since_last_detection=lambda: 3.5)
-    monkeypatch.setattr(
-        bluetooth,
-        "async_scanner_by_source",
-        lambda hass, source: scanner if source == "B0:A6:04:4D:82:ED" else None,
-    )
-    assert real._scanner_silent_for(hass, board) == 3.5  # the real one (tests patch scanner_silent_for)

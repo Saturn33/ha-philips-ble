@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 
 from . import BleMeshLightsConfigEntry, transport
@@ -15,16 +16,19 @@ from .const import PRESENCE_INTERVAL
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: BleMeshLightsConfigEntry
 ) -> dict[str, Any]:
+    if entry.state is not ConfigEntryState.LOADED:
+        # Setup failed (e.g. the counters are missing): what is known without the hub.
+        return {"state": entry.state.value, "options": dict(entry.options), "data": dict(entry.data)}
     hub = entry.runtime_data
     now = hub_module.monotonic()
     return {
+        "state": entry.state.value,
         "presence": {"interval": PRESENCE_INTERVAL, "power_cycle_gap": hub.power_cycle_gap},
         "options": dict(entry.options),
         "data": dict(entry.data),
         "profile_errors": hub.profile_errors,
         "boards": [
-            {"name": board.name, "node": board.node, "ready": transport.board_ready(hass, board)}
-            for board in hub.boards
+            {"name": board.name, "node": board.node, "ready": hub.board_ready(board)} for board in hub.boards
         ],
         "lamps": [
             {

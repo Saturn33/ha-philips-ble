@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 
@@ -84,7 +85,7 @@ async def test_turn_on_brightness_snaps_to_step(hass, fake_board, hass_storage):
 
 @pytest.mark.parametrize(
     ("current", "kelvin", "expected"),
-    [(2200, 3500, 4000), (2200, 3300, 4000), (6500, 3300, 3000), (None, 3300, 3000)],
+    [(2200, 3500, 4000), (2200, 3300, 3000), (3000, 3100, 4000), (6500, 3300, 3000), (None, 3300, 3000)],
 )
 async def test_turn_on_kelvin_snaps_in_the_direction_of_the_change(
     hass, fake_board, hass_storage, current, kelvin, expected
@@ -310,3 +311,55 @@ async def test_state_is_published_again_after_a_request(hass, fake_board, hass_s
         updates.append(hass.states.get(LIGHT).last_updated > before)
     assert updates == [True, True, True, False]
     assert hass.states.get(LIGHT).last_changed < start
+
+
+@pytest.mark.parametrize("effect", ["pairing", "nope"])
+async def test_unknown_effect_is_rejected(hass, fake_board, hass_storage, effect):
+    from homeassistant.exceptions import ServiceValidationError
+
+    from custom_components.ble_mesh_lights.const import STORAGE_SEQUENCE
+
+    await _setup(hass, fake_board, hass_storage)
+    counters = dict(hass_storage[STORAGE_SEQUENCE]["data"]["addresses"])
+    with pytest.raises(ServiceValidationError):
+        await _call(hass, "turn_on", **{ATTR_EFFECT: effect})
+    assert fake_board.sent == []
+    assert hass_storage[STORAGE_SEQUENCE]["data"]["addresses"] == counters
+
+
+async def test_same_step_after_a_remote_change_is_sent(hass, fake_board, hass_storage, fake_clock):
+    """An automation sets 50 %, the remote then sets 80 %, the automation sets 50 % again within
+    2 s: the lamp must go back to 50 %, not be skipped as "the same step again"."""
+    from .conftest import fire_raw_adv, remote_press
+
+    _, hub, l1 = await _setup(hass, fake_board, hass_storage, remote="valen:37af")
+    hub.set_assumed_state(l1, LampState(True, 3000, 80))
+    await _call(hass, "turn_on", **{ATTR_BRIGHTNESS: 128})  # 50 %
+    assert hub.lamps[l1].state.level == 50
+    fire_raw_adv(hass, remote_press("brightness_up", 0x37AF, 2280), fake_board.device_id)
+    await hass.async_block_till_done()
+    assert hub.lamps[l1].state.level == 80
+    fake_clock.now += 0.5
+    await _call(hass, "turn_on", **{ATTR_BRIGHTNESS: 128})
+    assert hub.lamps[l1].state.level == 50
+    assert _names(fake_board)[-1] == "brightness_down"
+
+
+async def test_same_step_after_a_remote_cancel_is_sent(hass, fake_board, hass_storage, fake_clock):
+    """A chain to 50 % runs, a remote press cancels it while its command is on the air, and the
+    same 50 % is asked again within 2 s: it must be sent, not skipped as "the same step"."""
+    from .conftest import fire_raw_adv, remote_press, wait_for
+
+    _, hub, l1 = await _setup(hass, fake_board, hass_storage, remote="valen:37af")
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))
+    fake_board.hold = asyncio.Event()
+    first = asyncio.ensure_future(_call(hass, "turn_on", **{ATTR_BRIGHTNESS: 128}))
+    await wait_for(lambda: hub.chain_running(l1))
+    fire_raw_adv(hass, remote_press("bright", 0x37AF, 2280), fake_board.device_id)  # 3000 K, 100 %
+    fake_clock.now += 0.5
+    second = asyncio.ensure_future(_call(hass, "turn_on", **{ATTR_BRIGHTNESS: 128}))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    fake_board.hold.set()
+    await asyncio.gather(first, second)
+    assert hub.lamps[l1].state.level == 50

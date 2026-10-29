@@ -26,7 +26,7 @@ from . import BleMeshLightsConfigEntry
 from . import hub as hub_module
 from .const import DOMAIN, LAMP_ALIASES
 from .entity import LampEntity
-from .planner import Target
+from .planner import Target, plan
 from .state import LampState, nearest_color_temp, nearest_level, snap_color_temp, snap_level
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,6 +127,12 @@ class BleMeshLight(LampEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         profile, state = self.lamp.profile, self.lamp.state
         if (effect := kwargs.get(ATTR_EFFECT)) is not None:
+            if effect not in profile.scenes:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="unknown_effect",
+                    translation_placeholders={"effect": effect, "effects": ", ".join(profile.scenes)},
+                )
             await self.hub.async_command(self.subentry_id, effect)
             return
         brightness = kwargs.get(ATTR_BRIGHTNESS)
@@ -148,7 +154,14 @@ class BleMeshLight(LampEntity, LightEntity):
         target = Target(True, color_temp, level)
         last = self._last_target
         self._last_target = (now, target)
-        skip = last is not None and last[1] == target and now - last[0] < DRAG_WINDOW
+        # The same step again during a drag is skipped while the chain to it runs or the lamp is
+        # already there; not if something else (a remote, a scene) has moved the lamp meanwhile.
+        skip = (
+            last is not None
+            and last[1] == target
+            and now - last[0] < DRAG_WINDOW
+            and (self.hub.chain_running(self.subentry_id) or not plan(profile, state, target))
+        )
         _LOGGER.debug(
             "%s: turn_on %s, lamp at %s, drag start %s → %s%s",
             self.entity_id,

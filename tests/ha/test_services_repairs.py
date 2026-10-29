@@ -84,7 +84,7 @@ async def test_outdated_board_issue(hass, make_board, hass_storage):
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"board_outdated_{board.device_id}") is not None
     board.set_connected(False)
     await hass.async_block_till_done()
-    board.set_connected(True, version="1")
+    board.set_connected(True, version="2")
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"board_outdated_{board.device_id}") is None
 
@@ -134,3 +134,70 @@ async def test_diagnostics(hass, fake_board, hass_storage):
     assert lamp["state"] == {"on": False, "color_temp": 2700, "level": 50, "scene": None}
     assert data["counters"]["0x7e01"] >= 1
     assert data["remotes"] == {} and data["unknown_remotes"] == []
+
+
+async def test_disabled_package_sensor_raises_its_own_issue(hass, fake_board, hass_storage):
+    """The sensor is the board's version and heartbeat: disabled, the board cannot be used, and the
+    repair must say so instead of "firmware outdated"."""
+    from homeassistant.helpers import entity_registry as er
+
+    er.async_get(hass).async_update_entity(
+        fake_board.version_entity_id, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    hass.states.async_remove(fake_board.version_entity_id)
+    await _setup(hass, [fake_board], hass_storage)
+    issues = ir.async_get(hass)
+    assert issues.async_get_issue(DOMAIN, f"board_sensor_disabled_{fake_board.device_id}") is not None
+    assert issues.async_get_issue(DOMAIN, f"board_outdated_{fake_board.device_id}") is None
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await hass.async_block_till_done()
+    assert issues.async_get_issue(DOMAIN, f"board_not_ready_{fake_board.device_id}") is None
+
+
+async def test_diagnostics_of_an_entry_in_setup_error(hass, fake_board, hass_storage):
+    entry = await setup_entry(
+        hass, [fake_board], lamps=[lamp_subentry()], hass_storage=hass_storage, counters={}
+    )
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["state"] == "setup_error"
+    assert data["options"]["base_address"] == 0x7E00
+
+
+async def test_remove_device_of_unloaded_entry_is_refused(hass, fake_board, hass_storage):
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.ble_mesh_lights import async_remove_config_entry_device
+
+    entry = await setup_entry(
+        hass, [fake_board], lamps=[lamp_subentry(remote="valen:37af")], hass_storage=hass_storage
+    )
+    device = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "remote_valen:37af"), entry.entry_id)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert await async_remove_config_entry_device(hass, entry, device) is False
+
+
+async def test_unknown_package_state_raises_no_repair(hass, fake_board, hass_storage):
+    """Right after a board boots HA may connect before the sensor's first publish: the state is
+    `unknown` for a few seconds. That is "not reported yet", not an old package."""
+    hass.states.async_set(fake_board.version_entity_id, "unavailable")
+    await _setup(hass, [fake_board], hass_storage)
+    hass.states.async_set(fake_board.version_entity_id, "unknown")
+    await hass.async_block_till_done()
+    hass.states.async_set(fake_board.version_entity_id, "2")
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"board_outdated_{fake_board.device_id}") is None
+    assert len(fake_board.setups) == 1
+
+
+async def test_board_not_ready_repair_clears_on_heartbeat(hass, fake_board, hass_storage, fake_clock):
+    fake_board.beating = False
+    await _setup(hass, [fake_board], hass_storage)
+    fake_clock.now += 40  # no heartbeat
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await hass.async_block_till_done()
+    issue_id = f"board_not_ready_{fake_board.device_id}"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    fake_board.beat()
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None

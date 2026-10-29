@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON, STATE_UNAVAILABLE
+from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -39,6 +39,8 @@ from .const import (
     DEFAULT_COMMAND_INTERVAL,
     DEFAULT_POWER_CYCLE_GAP,
     DOMAIN,
+    HEARTBEAT_EVENT,
+    HEARTBEAT_TIMEOUT,
     LAMP_ADDRESS,
     LAMP_AFTER_OUTAGE,
     LAMP_MAC,
@@ -86,6 +88,14 @@ NEW_LAMP_GAP = 3.0  # seconds of silence that count as "switched off" before the
 
 def remote_key(profile_id: str, source: int) -> str:
     return f"{profile_id}:{source:04x}"
+
+
+class NoAddressLeft(HomeAssistantError):
+    """No unicast address is left above the base address."""
+
+
+class HubClosed(HomeAssistantError):
+    """The hub was unloaded (the entry reloads or stops): it sends and saves nothing any more."""
 
 
 @dataclass
@@ -141,8 +151,7 @@ class Hub:
         self.ignored_remotes: set[str] = set()
         self._trackers: dict[str, RemoteTracker] = {}
         self._sent_log: dict[tuple[int, int], float] = {}
-        self._pairing_waiters: list[tuple[Profile, asyncio.Future[int]]] = []
-        self._press_waiters: list[tuple[str, asyncio.Future[str]]] = []
+        self._press_waiters: list[tuple[Profile, asyncio.Future[tuple[str, str]]]] = []
         self._presence: dict[str, PresenceTracker] = {}
         self._pending_restore: dict[str, float] = {}  # lamp → deadline (monotonic)
         self._restored_at: dict[str, float] = {}  # lamp → when it last got power
@@ -153,11 +162,14 @@ class Hub:
         self._board_locks: dict[str, asyncio.Lock] = {}
         self._lamp_locks: dict[str, asyncio.Lock] = {}
         self._generation: dict[str, int] = {}
+        self._running: dict[str, int] = {}  # lamp → generation of the chain that is running
         self._last_sent: dict[int, float] = {}
         self._last_tx = float("-inf")  # last time a board was sending (it does not listen then)
         self._rssi_avg: dict[tuple[str, str], float] = {}  # (lamp MAC, board) → smoothed RSSI
         self._board_since: dict[str, float] = {}  # lamp → when it last moved to another board
+        self._heartbeat: dict[str, float] = {}  # board → last heartbeat (or start/connect)
         self._unsubscribe: list[Callable[[], None]] = []
+        self.closed = False
 
     @property
     def power_cycle_gap(self) -> float:
@@ -226,6 +238,7 @@ class Hub:
 
         self._setup_remotes(lamp_subentries)
         self._unsubscribe.append(self.hass.bus.async_listen(RAW_ADV_EVENT, self._handle_raw_adv))
+        self._unsubscribe.append(self.hass.bus.async_listen(HEARTBEAT_EVENT, self._handle_heartbeat))
         await self._async_setup_boards()
         self._setup_presence()
 
@@ -284,6 +297,10 @@ class Hub:
         sensors = {}
         for board in self.boards:
             entity_id = transport.package_sensor(self.hass, board)
+            sensor_disabled = transport.package_sensor_disabled(self.hass, board)
+            self._board_sensor_disabled(board, sensor_disabled)
+            if sensor_disabled:
+                continue
             if entity_id is None:
                 _LOGGER.warning("%s has no BLE TX package sensor (ble-adv-tx package missing?)", board.name)
                 self._board_outdated(board, None)
@@ -300,7 +317,10 @@ class Hub:
     @callback
     def _check_boards_ready(self, _now=None) -> None:
         for board in self.boards:
-            if not transport.board_ready(self.hass, board):
+            # A disabled package sensor already has its own repair (_board_sensor_disabled).
+            if transport.package_sensor_disabled(self.hass, board):
+                continue
+            if not self.board_ready(board):
                 ir.async_create_issue(
                     self.hass,
                     DOMAIN,
@@ -310,6 +330,22 @@ class Hub:
                     translation_key="board_not_ready",
                     translation_placeholders={"board": board.name, "action": f"esphome.{board.service}"},
                 )
+
+    @callback
+    def _board_sensor_disabled(self, board: Board, disabled: bool) -> None:
+        issue_id = f"board_sensor_disabled_{board.device_id}"
+        if not disabled:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="board_sensor_disabled",
+            translation_placeholders={"board": board.name},
+        )
 
     @callback
     def _board_outdated(self, board: Board, version: str | None) -> None:
@@ -340,20 +376,46 @@ class Hub:
         @callback
         def _changed(event: Event[EventStateChangedData]) -> None:
             old, new = event.data["old_state"], event.data["new_state"]
-            was = old is not None and old.state != STATE_UNAVAILABLE
-            now = new is not None and new.state != STATE_UNAVAILABLE
+            # `unknown`: connected but the package has not reported yet (see transport.package_version).
+            was = old is not None and old.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+            now = new is not None and new.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+            board = sensors[event.data["entity_id"]]
             if now and not was:
-                board = sensors[event.data["entity_id"]]
                 self.entry.async_create_background_task(
                     self.hass, self._async_board_connected(board), f"ble_mesh_lights connect {board.node}"
                 )
+            elif now:
+                self._board_outdated(board, new.state)  # a new value without a reconnect
 
         return _changed
 
+    def board_ready(self, board: Board) -> bool:
+        """Connected (action and package sensor) and, on package 2 or later, a heartbeat within
+        HEARTBEAT_TIMEOUT. HA notices a lost ESPHome connection only after up to a minute, and an
+        action called meanwhile is lost without an error. The heartbeat is an event because HA's
+        ESPHome integration drops a re-sent unchanged state (components/esphome/entry_data.py,
+        async_update_state), while it fires every ESPHome event (manager.py, async_on_service_call)."""
+        if not transport.board_ready(self.hass, board):
+            return False
+        if not transport.has_heartbeat(self.hass, board):
+            return True
+        last = self._heartbeat.setdefault(board.device_id, monotonic())  # a new board gets its grace
+        return monotonic() - last < HEARTBEAT_TIMEOUT
+
+    @callback
+    def _handle_heartbeat(self, event: Event) -> None:
+        device_id = event.data.get("device_id")
+        for board in self.boards:
+            if board.device_id == device_id:
+                self._heartbeat[device_id] = monotonic()
+                if self.board_ready(board):
+                    ir.async_delete_issue(self.hass, DOMAIN, f"board_not_ready_{device_id}")
+
     async def _async_board_connected(self, board: Board) -> None:
         """A board (re)connected: it forwards nothing until the receiver is set up again."""
+        self._heartbeat[board.device_id] = monotonic()  # time for its first heartbeat
         self._board_outdated(board, transport.package_version(self.hass, board))
-        if transport.board_ready(self.hass, board):
+        if self.board_ready(board):
             ir.async_delete_issue(self.hass, DOMAIN, f"board_not_ready_{board.device_id}")
         try:
             await transport.async_setup_receiver(self.hass, board)
@@ -361,11 +423,22 @@ class Hub:
             _LOGGER.warning("Could not set up receiving on %s: %s", board.name, err)
 
     async def async_unload(self) -> None:
+        """Stop for good. A reloaded entry gets a new hub on the same stores: this one must not send
+        or save after it, or its older counters could overwrite the new hub's (and a counter that
+        goes back makes a lamp ignore HA)."""
+        self.closed = True
         for unsubscribe in self._unsubscribe:
             unsubscribe()
         self._unsubscribe.clear()
         for sub_id in self._generation:
             self._generation[sub_id] += 1  # running chains stop before their next command
+        for _, future in self._press_waiters:
+            if not future.done():
+                future.set_exception(HubClosed("BLE Mesh Lights reloaded"))
+        # Let a command that is on the air finish and be applied before the final save.
+        for lock in [*self._lamp_locks.values(), *self._board_locks.values()]:
+            async with lock:
+                pass
         await self._state_store.async_save(self._data_to_store())
 
     # State
@@ -407,7 +480,8 @@ class Hub:
 
     @callback
     def async_schedule_save(self) -> None:
-        self._state_store.async_delay_save(self._data_to_store, SAVE_DELAY)
+        if not self.closed:
+            self._state_store.async_delay_save(self._data_to_store, SAVE_DELAY)
 
     @callback
     def lamp_changed(self, subentry_id: str) -> None:
@@ -415,7 +489,8 @@ class Hub:
         self.async_schedule_save()
 
     def set_assumed_state(self, subentry_id: str, state: LampState) -> None:
-        """The user says what the lamp looks like now (nothing is sent)."""
+        """The user says what the lamp looks like now (nothing is sent); a running chain stops."""
+        self.cancel_pending(subentry_id)
         lamp = self.lamps[subentry_id]
         lamp.state = state
         lamp.uncertain = False
@@ -434,7 +509,7 @@ class Hub:
         """The lamp's board as the presence check keeps it (smoothed, see _update_rssi); if that
         board is not ready, the best ready one now."""
         for board in self.boards:
-            if board.device_id == lamp.board and transport.board_ready(self.hass, board):
+            if board.device_id == lamp.board and self.board_ready(board):
                 return board
         board, rssi = self.choose_board_for(lamp.mac, lamp.board)
         if board.device_id != lamp.board:
@@ -447,7 +522,7 @@ class Hub:
     def choose_board_for(self, mac: str, last_board: str | None = None) -> tuple[Board, int | None]:
         """The ready board that hears `mac` best (and its RSSI), keeping `last_board` unless another
         is clearly better; else the board that last did; else any ready one."""
-        ready = [board for board in self.boards if transport.board_ready(self.hass, board)]
+        ready = [board for board in self.boards if self.board_ready(board)]
         if not ready:
             raise BoardUnavailable("No board is connected")
         heard = self._heard_by_ready_boards(mac, ready)
@@ -463,7 +538,7 @@ class Hub:
         """Board device id → RSSI, for connected boards only: HA keeps an unplugged board's last
         RSSI for a while."""
         if ready is None:
-            ready = [board for board in self.boards if transport.board_ready(self.hass, board)]
+            ready = [board for board in self.boards if self.board_ready(board)]
         ready_ids = {board.device_id for board in ready}
         return {d: rssi for d, rssi in transport.rssi_by_board(self.hass, mac).items() if d in ready_ids}
 
@@ -485,15 +560,30 @@ class Hub:
         return self._board_locks.setdefault(board.device_id, asyncio.Lock())
 
     async def async_transmit(
-        self, profile: Profile, address: int, command: str, board: Board, repeat: int = TRANSMIT_REPEAT
-    ) -> None:
-        """Send one command as `address`. The sequence number is used up even if sending fails."""
+        self,
+        profile: Profile,
+        address: int,
+        command: str,
+        board: Board,
+        repeat: int = TRANSMIT_REPEAT,
+        still_wanted: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Send one command as `address`. The sequence number is used up even if sending fails.
+        False: not sent, because `still_wanted()` turned false while waiting out the interval."""
+        if self.closed:
+            raise HubClosed("BLE Mesh Lights reloaded")
         addressing.check_sender(address, self.remote_sources())
         wait = self.command_interval - (monotonic() - self._last_sent.get(address, float("-inf")))
         if wait > 0:
             await sleep(wait)
+        if still_wanted is not None and not still_wanted():
+            return False
         codec = self.codec(profile)
         async with self._board_lock(board):
+            if self.closed:
+                raise HubClosed("BLE Mesh Lights reloaded")
+            if still_wanted is not None and not still_wanted():
+                return False  # superseded while another lamp's command had the board
             self._last_tx = monotonic()
             sequence = await self.counters.async_next(address)
             self._sent_log[(address, sequence)] = monotonic()
@@ -506,6 +596,7 @@ class Hub:
                 await transport.async_send(self.hass, board, raw, repeat=repeat, duration=TRANSMIT_DURATION)
             finally:
                 self._last_sent[address] = self._last_tx = monotonic()
+        return True
 
     async def _async_run(self, subentry_id: str, make_commands: Callable[[LampRuntime], list[str]]) -> None:
         """Run a chain for one lamp. A newer chain for the lamp stops this one before its next
@@ -516,22 +607,50 @@ class Hub:
         async with self._lamp_locks.setdefault(subentry_id, asyncio.Lock()):
             if self._generation[subentry_id] != generation:
                 return
+            self._running[subentry_id] = generation
             try:
-                commands = make_commands(lamp)
-            except planner.PlanError as err:
-                raise ServiceValidationError(str(err)) from err
-            _LOGGER.debug("%s: from %s, commands %s", lamp.mac, lamp.state, commands)
-            for command in commands:
-                if self._generation[subentry_id] != generation:
-                    _LOGGER.debug("%s: chain superseded before %s", lamp.mac, command)
-                    return
-                board = self.choose_board(lamp)
-                await self.async_transmit(lamp.profile, lamp.address, command, board)
-                lamp.state = apply(lamp.profile, lamp.state, command)
-                effect = lamp.profile.commands[command].effect
-                if effect is not None and effect.color_temp is not None and effect.level is not None:
-                    lamp.uncertain = False  # a scene sets everything: the state is known again
-                self.lamp_changed(subentry_id)
+                await self._async_run_chain(subentry_id, lamp, generation, make_commands)
+            finally:
+                if self._running.get(subentry_id) == generation:
+                    del self._running[subentry_id]
+
+    async def _async_run_chain(
+        self,
+        subentry_id: str,
+        lamp: LampRuntime,
+        generation: int,
+        make_commands: Callable[[LampRuntime], list[str]],
+    ) -> None:
+        try:
+            commands = make_commands(lamp)
+        except planner.PlanError as err:
+            raise ServiceValidationError(str(err)) from err
+        _LOGGER.debug("%s: from %s, commands %s", lamp.mac, lamp.state, commands)
+        for command in commands:
+            if self._generation[subentry_id] != generation:
+                _LOGGER.debug("%s: chain superseded before %s", lamp.mac, command)
+                return
+            board = self.choose_board(lamp)
+            sent = await self.async_transmit(
+                lamp.profile,
+                lamp.address,
+                command,
+                board,
+                still_wanted=lambda: self._generation[subentry_id] == generation,
+            )
+            if not sent:
+                _LOGGER.debug("%s: chain superseded before %s", lamp.mac, command)
+                return
+            lamp.state = apply(lamp.profile, lamp.state, command)
+            effect = lamp.profile.commands[command].effect
+            if effect is not None and effect.color_temp is not None and effect.level is not None:
+                lamp.uncertain = False  # a scene sets everything: the state is known again
+            self.lamp_changed(subentry_id)
+
+    def chain_running(self, subentry_id: str) -> bool:
+        """A chain for the lamp's current request is running (not one superseded or cancelled)."""
+        running = self._running.get(subentry_id)
+        return running is not None and running == self._generation.get(subentry_id)
 
     def cancel_pending(self, subentry_id: str) -> None:
         """Stop the lamp's running chain before its next command (a remote press wins)."""
@@ -554,18 +673,6 @@ class Hub:
 
     async def async_command(self, subentry_id: str, command: str) -> None:
         await self._async_run(subentry_id, lambda lamp: [command])
-
-    async def async_command_address(self, profile: Profile, address: int, command: str, board: Board) -> None:
-        """One command as an address that has no lamp yet (the wizard)."""
-        await self.async_transmit(profile, address, command, board)
-
-    async def async_pair(self, profile: Profile, address: int, board: Board) -> None:
-        """The pairing burst: the lamp accepts it only within its pairing window after power-on."""
-        rules = profile.pairing
-        for index in range(rules.requests):
-            if index:
-                await sleep(rules.interval)
-            await self.async_transmit(profile, address, rules.command, board, repeat=1)
 
     # Adding lamps
 
@@ -593,21 +700,28 @@ class Hub:
     def allocate_address(self) -> tuple[int, int]:
         """The next (index, address), recorded in the entry at once so it is never handed out again."""
         used = self.used_indices()
-        index, address = addressing.allocate(self.base_address, used, avoid=self.remote_sources())
+        try:
+            index, address = addressing.allocate(self.base_address, used, avoid=self.remote_sources())
+        except ValueError as err:
+            raise NoAddressLeft(str(err)) from err
         self.hass.config_entries.async_update_entry(
             self.entry, data={**self.entry.data, DATA_USED_INDICES: sorted(used | {index})}
         )
         return index, address
 
-    async def async_wait_for_new_lamp(self, profile: Profile, timeout: float) -> str:
+    async def async_wait_for_new_lamp(self, profile: Profile, timeout: float, mac: str | None = None) -> str:
         """MAC of a lamp not yet configured whose active beacon appears after the call, for the first
-        time or after a silence of NEW_LAMP_GAP (it was switched off and on at the wall)."""
-        configured = self.configured_macs()
+        time or after a silence of NEW_LAMP_GAP (it was switched off and on at the wall). With `mac`,
+        only that lamp counts, configured or not (pairing it again)."""
+        wanted = mac.upper() if mac else None
+        configured = self.configured_macs() if wanted is None else set()
         deadline = monotonic() + timeout
         last_seen = {address.upper(): t for address, _raw, t in transport.discovered_beacons(self.hass)}
         returned: set[str] = set()
         while monotonic() < deadline:
             await sleep(NEW_LAMP_POLL)
+            if self.closed:
+                raise HubClosed("BLE Mesh Lights reloaded")
             for address, raw, advert_time in transport.discovered_beacons(self.hass):
                 mac = address.upper()
                 previous = last_seen.get(mac)
@@ -616,7 +730,7 @@ class Hub:
                 if previous is None or advert_time - previous >= NEW_LAMP_GAP:
                     returned.add(mac)
                 last_seen[mac] = advert_time
-                if mac in configured or mac not in returned:
+                if mac in configured or mac not in returned or (wanted and mac != wanted):
                     continue
                 beacon = parse_beacon(profile, raw)
                 if beacon is not None and not beacon.quiet and beacon.mac == mac:
@@ -786,7 +900,9 @@ class Hub:
 
     @callback
     def _outage_started(self) -> None:
-        """Power came back after an outage: lamps set to "restore" go back to their last state."""
+        """Power came back after an outage: lamps set to "restore" go back to their last state.
+        Deliberately simple until the outage detector defines the sensor's behaviour; its known
+        gaps are in docs/KNOWN_ISSUES.md ("Outage restore is simple until the outage detector")."""
         now = monotonic()
         for lamp in self.lamps.values():
             if lamp.after_outage != AFTER_OUTAGE_RESTORE:
@@ -911,40 +1027,44 @@ class Hub:
         self.async_schedule_save()
 
     def _resolve_waiters(self, profile: Profile, key: str, press: RemotePress) -> bool:
+        """Hand a press to the wizard waiting for one; True if it took it."""
+        if press.command == profile.pairing.command or press.late:
+            return False
         taken = False
-        if press.command == profile.pairing.command:
-            for waiting_profile, future in self._pairing_waiters:
-                if waiting_profile.id == profile.id and not future.done():
-                    future.set_result(press.source)
-                    taken = True
-        elif not press.late:
-            for waiting_key, future in self._press_waiters:
-                if waiting_key == key and not future.done():
-                    future.set_result(press.command)
-                    taken = True
-        return taken or any(k == key for k, _ in self._press_waiters)
+        for waiting_profile, future in self._press_waiters:
+            if waiting_profile.id == profile.id and not future.done():
+                future.set_result((key, press.command))
+                taken = True
+        return taken
 
-    async def async_wait_for_pairing(self, profile: Profile, timeout: float) -> int:
-        """Source of the first remote pairing request heard after the call."""
-        future: asyncio.Future[int] = self.hass.loop.create_future()
+    async def async_wait_for_remote_press(self, profile: Profile, timeout: float) -> tuple[str, str]:
+        """(remote key, command) of the next press from any remote of this profile; pairing
+        requests and late presses do not count."""
+        future: asyncio.Future[tuple[str, str]] = self.hass.loop.create_future()
         waiter = (profile, future)
-        self._pairing_waiters.append(waiter)
-        try:
-            async with asyncio.timeout(timeout):
-                return await future
-        finally:
-            self._pairing_waiters.remove(waiter)
-
-    async def async_wait_for_press(self, key: str, timeout: float) -> str:
-        """The next command (not a pairing request) from this remote."""
-        future: asyncio.Future[str] = self.hass.loop.create_future()
-        waiter = (key, future)
         self._press_waiters.append(waiter)
         try:
             async with asyncio.timeout(timeout):
                 return await future
         finally:
             self._press_waiters.remove(waiter)
+
+    async def async_add_remote_lamp(self, key: str, subentry_id: str) -> None:
+        """The remote also controls this lamp; its other lamps stay."""
+        remote = self.remotes.get(key)
+        lamps = list(remote.lamps) if remote else []
+        if subentry_id not in lamps:
+            lamps.append(subentry_id)
+        await self.async_bind_remote(key, lamps)
+
+    def remote_lamp_names(self, key: str) -> list[str]:
+        """Titles of the lamps this remote controls."""
+        remote = self.remotes.get(key)
+        if remote is None:
+            return []
+        return [
+            self.entry.subentries[sub_id].title for sub_id in remote.lamps if sub_id in self.entry.subentries
+        ]
 
     async def async_bind_remote(self, key: str, lamps: list[str]) -> None:
         """Bind a remote to these lamps (replacing its previous lamps)."""

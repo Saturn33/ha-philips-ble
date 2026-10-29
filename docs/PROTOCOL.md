@@ -80,7 +80,7 @@ Tested and found to do nothing on the Valen:
 - `C8 11 02 TT 01 02 14 41` and `… 01 03 14 41` (the Skylight's hold codes);
 - other values of the step byte (`0x14`). `05`, `14` and `50` all give exactly one step. There is no absolute brightness command that we know of.
 
-Holding ON, OFF, SELECT or a scene button sends nothing extra.
+Holding ON, OFF, SELECT or a scene button sends nothing extra. (Holding ON right after the light gets power is the remote's pairing gesture; see the remote's pairing below.)
 
 A scene command turns an off light on. ON brings the light back with the brightness and colour temperature it had before OFF. While the light is off, SELECT and brightness up/down do nothing.
 
@@ -110,7 +110,9 @@ Observations:
 - Any unicast address works. We paired `0x7FFE`, `0x7FFD` and `0x02ED` (the last one made from the transmitter's BLE address `B0:A6:04:4D:82:ED` by the remotes' rule, to test whether the light requires that). The address does not have to relate to the transmitter's BLE address.
 - Each light obeys only its own paired senders. With light 1 paired to `0x7FFE` and light 2 to `0x7FFD`, each address controlled only its light. This is what makes per-light control possible.
 - The real remote's pairing request is identical to ours: the same payload, about 2 requests a second, sequence +1 each. The six `11` bytes carry no remote identity.
-- The owner reports that a light keeps two senders. Pairing our address and then the remote left both working. A third sender was not tested.
+- A light blinks only when it stores a new sender. Pairing an address it already knows is accepted without a blink (owner, 0.1.1 live check); after a factory reset the same address makes it blink again.
+- A light keeps at least six senders: after a factory reset, HA's address and five remotes paired one after another all worked at the same time; none was pushed out (0.1.1 live check). The limit was not reached.
+- **Pairing a remote** (owner's routine): switch the light off and on at the wall, then right away press and hold ON on the remote until the light blinks (usually 1–2 s). The remote sends the pairing request above.
 - **The remote stays in pairing mode** after its own pairing: it keeps sending `CF …` requests, with its LED on, until any button on it is pressed. As long as it does, the light ignores normal commands from every sender. Pressing a remote button ends it.
 - `CF 11 02 TT 02 11…` (unpair all, on the Skylight) was not tried on the Valen.
 
@@ -157,6 +159,7 @@ What made our ESP32-C3 transmitter work, in order of importance:
 3. **Continuous scanning otherwise.** With ESPHome's default scan (30 of every 320 ms), most remote presses are missed.
 4. **No Wi-Fi roaming.** `post_connect_roaming: false`. Roaming every five minutes breaks the API connection for up to 45 s (found by jphelan82).
 5. **One sender address per light**, each with its own sequence counter that only goes up and is saved before use.
+6. **A heartbeat from the board** (package version 2). Home Assistant notices a lost ESPHome API connection only after up to a minute, and an action called on such a board is accepted and lost without an error. The board fires the event `esphome.ble_adv_tx.heartbeat` every 10 s (Home Assistant adds the board's `device_id`), and the integration stops sending through a board whose last heartbeat is older than 35 s. It is an event because Home Assistant's ESPHome integration drops a re-sent unchanged sensor state, while it puts every ESPHome event on the bus. Judging a board by the BLE traffic it forwards does not work: where only quiet-mode lights are in range, a healthy board forwards nothing for a minute.
 
 ESPHome 2026.10 note: after `esp32_ble_tracker.stop_scan()`, setting `scan_continuous` back to true is not enough to restart the scan, because the tracker's loop only re-checks on a scanner state change. Call `start_scan_if_idle()` as well.
 

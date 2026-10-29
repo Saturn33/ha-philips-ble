@@ -121,3 +121,22 @@ def test_unexpected_error_in_one_profile_does_not_stop_others(tmp_path):
     profiles, errors = profile.load_profiles(tmp_path)
     assert list(profiles) == ["valen"]
     assert len(errors) == 1 and "bad" in errors[0]
+
+
+def test_hints_by_language(valen, tmp_path):
+    assert "«Вкл»" in valen.pairing.hint("remote", "ru")
+    assert "любую кнопку" in valen.pairing.hint("remote", "ru")
+    assert "press and hold ON" in valen.pairing.hint("remote", "de")
+    assert "Пять раз" in valen.pairing.hint("reset", "ru")
+    assert "five times" in valen.pairing.hint("reset", "en")
+
+    toggle = profile.load_profile(TESTS / "fixtures" / "profiles" / "toggle" / "profile.yaml")
+    assert toggle.pairing.hint("reset", "ru") == toggle.pairing.hint("reset", "en") != ""
+
+    text = VALEN.read_text(encoding="utf-8")
+    old = '    en: "Switch the light off and on at the wall five times quickly."\n'
+    assert old in text
+    path = tmp_path / "profile.yaml"
+    path.write_text(text.replace(old, ""), encoding="utf-8")
+    with pytest.raises(profile.ProfileError):
+        profile.load_profile(path)

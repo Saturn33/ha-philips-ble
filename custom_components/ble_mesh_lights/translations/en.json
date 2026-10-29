@@ -15,7 +15,7 @@
           "boards": "ESPHome boards running the ble-adv-tx package.",
           "base_address": "Lights get the addresses after this one (0x7E01, 0x7E02, …). Keep the default unless it clashes with other Bluetooth Mesh devices. It cannot be changed once a light is added.",
           "command_interval": "Shortest time between two commands to the same light.",
-          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage. Lights set to \"Restore previous state\" return to their last state then.",
+          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage and turns off again afterwards (a sensor that stays on is not suitable). Lights set to \"Restore previous state\" return to their last state then. Known limits: see \"Known issues\" in the integration's documentation.",
           "power_cycle_gap": "A light keeps advertising for about 7 s after it is switched off at the wall; in the first 30 minutes after it gets power it sends several messages a second. A silence of this many seconds after that counts as a possible short switch-off, and the light's state is marked uncertain. Shorter: catches quicker cycles, but a weak signal gives more false alarms. Cycles under about 7 s cannot be seen at all."
         }
       }
@@ -50,7 +50,7 @@
           "boards": "ESPHome boards running the ble-adv-tx package.",
           "base_address": "Lights get the addresses after this one (0x7E01, 0x7E02, …). Keep the default unless it clashes with other Bluetooth Mesh devices. It cannot be changed once a light is added.",
           "command_interval": "Shortest time between two commands to the same light.",
-          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage. Lights set to \"Restore previous state\" return to their last state then.",
+          "outage_sensor": "Optional. A binary sensor that turns on when mains power comes back after an outage and turns off again afterwards (a sensor that stays on is not suitable). Lights set to \"Restore previous state\" return to their last state then. Known limits: see \"Known issues\" in the integration's documentation.",
           "power_cycle_gap": "A light keeps advertising for about 7 s after it is switched off at the wall; in the first 30 minutes after it gets power it sends several messages a second. A silence of this many seconds after that counts as a possible short switch-off, and the light's state is marked uncertain. Shorter: catches quicker cycles, but a weak signal gives more false alarms. Cycles under about 7 s cannot be seen at all."
         }
       },
@@ -138,11 +138,15 @@
     },
     "board_outdated": {
       "title": "{board}: firmware package outdated",
-      "description": "The board {board} reports ble-adv-tx package version {version}; BLE Mesh Lights needs version {required} or later. Update the board's ESPHome firmware (see the board guide)."
+      "description": "The board {board} reports ble-adv-tx package version {version}; BLE Mesh Lights needs version {required} or later. It still sends with the old version, but from version 2 the board sends a heartbeat event every 10 s, so an unplugged board is noticed within about 35 s instead of up to a minute (commands sent to it meanwhile are lost). Update the board's ESPHome firmware (see the board guide)."
     },
     "board_not_ready": {
       "title": "{board} is not ready",
-      "description": "The board {board} is not connected, or its action {action} does not exist. Check that the board is online and runs the ble-adv-tx package."
+      "description": "The board {board} is not connected, its action {action} does not exist, or (package 2) its heartbeat event esphome.ble_adv_tx.heartbeat does not arrive. Check that the board is online and runs the ble-adv-tx package."
+    },
+    "board_sensor_disabled": {
+      "title": "{board}: BLE TX package sensor disabled",
+      "description": "The diagnostic sensor \"BLE TX package\" of the board {board} is disabled. BLE Mesh Lights reads the board's firmware version from it, so it cannot send through this board. Enable the sensor in the board's device page, then reload BLE Mesh Lights (its menu → Reload)."
     }
   },
   "config_subentries": {
@@ -167,28 +171,20 @@
         },
         "power_cycle_timeout": {
           "title": "No light found",
-          "description": "No light was switched on within 2 minutes. Submit to try again: switch the light off at the wall, wait 5 seconds, and switch it on."
+          "description": "No light was switched on within 2 minutes. Submit to try again: switch the light off at the wall, wait about 15 seconds, and switch it on."
         },
         "blinked": {
           "title": "Did the light blink?",
           "description": "Home Assistant has just paired with {name}.",
           "menu_options": {
-            "remote": "Yes, it blinked",
+            "test": "Yes, it blinked",
             "power_cycle": "No, try again"
-          }
-        },
-        "remote": {
-          "title": "Remote",
-          "description": "Pair the light's remote with it now, so Home Assistant follows its presses.",
-          "menu_options": {
-            "remote_wait": "Pair a remote now",
-            "test": "No remote"
           }
         },
         "test_result": {
           "title": "Did the light switch off and on?",
           "menu_options": {
-            "finish": "Yes",
+            "save": "Yes",
             "test_failed": "No"
           }
         },
@@ -201,27 +197,71 @@
             "reset_abort": "Reset the light and stop"
           }
         },
+        "remote": {
+          "title": "Remote",
+          "description": "{name} is ready. Bind its remote, so that Home Assistant follows the remote's presses?",
+          "menu_options": {
+            "remote_pair": "Bind a remote",
+            "done": "Done, no remote"
+          }
+        },
+        "remote_pair": {
+          "title": "Remote",
+          "description": "If the remote is already paired with this light, just select Next.\n\nIf not, pair it:\n{remote_hint}\n\nThen select Next."
+        },
+        "remote_not_heard": {
+          "title": "No press heard",
+          "description": "Home Assistant heard no button of a remote within a minute. A single press is sometimes lost on the air.",
+          "menu_options": {
+            "remote_pair": "Try again",
+            "done": "Done, no remote"
+          }
+        },
+        "remote_heard": {
+          "title": "Remote {address}",
+          "description": "Heard remote {address}, button \"{button}\". It controls now: {lamps}.",
+          "menu_options": {
+            "remote_bind": "Bind it to this light",
+            "remote_press": "Not this remote, again",
+            "done": "Done, no remote"
+          }
+        },
         "reconfigure": {
+          "title": "Light {name}",
+          "menu_options": {
+            "settings": "Settings",
+            "pair_again": "Pair again"
+          }
+        },
+        "settings": {
           "title": "Lamp settings",
           "description": "Before you delete a lamp, reset it ({reset_hint}) and pair its remote again: the integration never sends \"unpair all\".",
           "data": {
             "name": "Name",
             "after_outage": "After a power outage"
           }
+        },
+        "pair_again": {
+          "title": "Pair again",
+          "description": "After a factory reset ({reset_hint}) the light has forgotten Home Assistant and its remote. Pair it again here: its address, entities and automations stay. Select Submit, then switch the light off and on as the next screen says."
         }
       },
       "progress": {
-        "power_cycle": "Switch the light off at the wall, wait 5 seconds, then switch it on. Home Assistant pairs with it as soon as it appears.",
-        "remote_wait": "Switch the light off and on again, then pair its remote as the manual says.",
-        "remote_button": "Press any button on the remote.",
-        "test": "Home Assistant switches the light off and on again."
+        "power_cycle": "Switch the light off at the wall, wait about 15 seconds, then switch it on. Home Assistant pairs with it as soon as it appears.",
+        "test": "Home Assistant switches the light off and on again.",
+        "remote_press": "Press any scene button on the remote.",
+        "again_test": "If the light was reset, it blinks now; if not, it does not, because it still knows Home Assistant. Both are fine. Home Assistant now switches the light off and on, to show that it obeys."
       },
       "abort": {
         "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again.",
         "no_address_left": "No address is left above the base address.",
         "send_failed": "Sending failed: {error}",
         "reset_needed": "Reset the light, then add it again: {reset_hint}",
-        "reconfigure_successful": "Re-configuration was successful."
+        "reconfigure_successful": "Re-configuration was successful.",
+        "lamp_added": "{name} is added.",
+        "remote_bound": "Remote {address} is bound to {name}. Press a scene on the remote: the light's card shows it.",
+        "paired_again": "{name} is paired again.",
+        "already_configured": "This light is already added."
       },
       "error": {}
     }
@@ -343,6 +383,9 @@
   "exceptions": {
     "unknown_command": {
       "message": "Unknown command \"{command}\". Commands: {commands}."
+    },
+    "unknown_effect": {
+      "message": "Unknown effect \"{effect}\". Effects: {effects}."
     }
   },
   "services": {

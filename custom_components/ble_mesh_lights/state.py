@@ -103,25 +103,25 @@ def nearest_color_temp(profile: Profile, kelvin: float) -> int:
     return min(profile.color_temps, key=lambda k: (abs(1_000_000 / k - target), k))
 
 
-def _snap(values: tuple[int, ...], requested: float, current: int | None) -> int | None:
-    """The step in the direction of the change from `current`: a slider moved a little up
-    gives the next step up, not the current step again. None when current is not a step."""
-    if current not in values:
-        return None
-    if requested > current:
-        above = [v for v in values if v >= requested]
-        return min(above) if above else max(values)
-    if requested < current:
-        below = [v for v in values if v <= requested]
-        return max(below) if below else min(values)
-    return current
+def _snap(values: tuple[int, ...], requested: float, current: int | None, nearest: int) -> int:
+    """The nearest step; but when that is the current step and a different value was asked, the
+    next step in that direction (a slider moved a little would otherwise change nothing, and HA
+    leaves it where it was dropped). None beyond the ends."""
+    if current not in values or nearest != current or requested == current:
+        return nearest
+    ordered = sorted(values)
+    index = ordered.index(current) + (1 if requested > current else -1)
+    return ordered[index] if 0 <= index < len(ordered) else current
 
 
 def snap_level(profile: Profile, percent: float, current: int | None) -> int:
-    snapped = _snap(profile.brightness_levels, percent, current)
-    return nearest_level(profile, percent) if snapped is None else snapped
+    levels = profile.brightness_levels
+    distance = min(abs(level - percent) for level in levels)
+    tied = [level for level in levels if abs(level - percent) == distance]
+    # Halfway between two steps: the one nearer the current step (the smaller change).
+    nearest = min(tied, key=lambda level: abs(level - current)) if current in levels else tied[0]
+    return _snap(levels, percent, current, nearest)
 
 
 def snap_color_temp(profile: Profile, kelvin: float, current: int | None) -> int:
-    snapped = _snap(profile.color_temps, kelvin, current)
-    return nearest_color_temp(profile, kelvin) if snapped is None else snapped
+    return _snap(profile.color_temps, kelvin, current, nearest_color_temp(profile, kelvin))

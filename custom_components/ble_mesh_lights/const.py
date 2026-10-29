@@ -35,7 +35,11 @@ DATA_USED_INDICES = "used_indices"
 
 # The ble-adv-tx firmware package
 RAW_ADV_EVENT = "esphome.ble_adv.raw_adv"
-REQUIRED_PACKAGE_VERSION = 1
+REQUIRED_PACKAGE_VERSION = 2
+# From this package version the board fires this event every 10 s (a heartbeat).
+HEARTBEAT_EVENT = "esphome.ble_adv_tx.heartbeat"
+HEARTBEAT_PACKAGE_VERSION = 2
+HEARTBEAT_TIMEOUT = 35.0  # s without a heartbeat before a board counts as gone (2 may be lost)
 PACKAGE_SENSOR_NAME = "BLE TX package"
 PACKAGE_SENSOR_OBJECT_ID = "ble_tx_package"
 TRANSMIT_DURATION = 100  # ms

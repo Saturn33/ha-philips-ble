@@ -25,6 +25,7 @@ from custom_components.ble_mesh_lights.const import (
     CONF_COMMAND_INTERVAL,
     DATA_USED_INDICES,
     DOMAIN,
+    HEARTBEAT_EVENT,
     RAW_ADV_EVENT,
     STORAGE_SEQUENCE,
     STORAGE_VERSION,
@@ -63,29 +64,31 @@ class FakeBoard:
     sent: list[dict[str, Any]] = field(default_factory=list)
     setups: list[dict[str, Any]] = field(default_factory=list)
     offline: bool = False
-    silent: float = 0.0  # seconds since its Bluetooth scanner last reported an advert
+    beating: bool = True  # sends its heartbeat whenever the fake clock moves
+    hold: asyncio.Event | None = None  # while set and not released, a send stays on the air
+    version: str = "2"
 
     @property
     def prefix(self) -> str:
         return self.node.replace("-", "_")
 
-    def set_connected(self, connected: bool, version: str = "1") -> None:
+    def beat(self) -> None:
+        """The board's heartbeat event (every 10 s on package 2), as HA's ESPHome integration fires it."""
+        self.hass.bus.async_fire(HEARTBEAT_EVENT, {"device_id": self.device_id, "version": self.version})
+
+    def set_connected(self, connected: bool, version: str | None = None) -> None:
         """Drive the "BLE TX package" sensor, which is how the hub sees (re)connects."""
         self.offline = not connected
-        self.hass.states.async_set(self.version_entity_id, version if connected else "unavailable")
+        if version is not None:
+            self.version = version
+        self.hass.states.async_set(self.version_entity_id, self.version if connected else "unavailable")
 
 
 @pytest.fixture
-def make_board(hass: HomeAssistant, monkeypatch):
+def make_board(hass: HomeAssistant):
     """Factory for fake ESPHome boards with the ble-adv-tx actions and version sensor."""
-    boards: dict[str, FakeBoard] = {}
-    monkeypatch.setattr(
-        transport,
-        "scanner_silent_for",
-        lambda hass, board: boards[board.device_id].silent if board.device_id in boards else None,
-    )
 
-    def _make(node: str = "ble-proxy-tx-kitchen", name: str = "BLE Proxy TX (Kitchen)", version: str = "1"):
+    def _make(node: str = "ble-proxy-tx-kitchen", name: str = "BLE Proxy TX (Kitchen)", version: str = "2"):
         esphome_entry = MockConfigEntry(domain="esphome", data={"device_name": node}, title=name)
         esphome_entry.add_to_hass(hass)
         device = dr.async_get(hass).async_get_or_create(
@@ -99,11 +102,13 @@ def make_board(hass: HomeAssistant, monkeypatch):
             config_entry=esphome_entry,
             original_name="BLE TX package",
         )
-        board = FakeBoard(hass, node, name, device.id, entity.entity_id)
-        boards[device.id] = board
+        board = FakeBoard(hass, node, name, device.id, entity.entity_id, version=version)
+        _BOARDS.append(board)
 
         async def adv(call: ServiceCall) -> None:
             await asyncio.sleep(0)  # a real action goes over the network: other tasks run meanwhile
+            if board.hold is not None:
+                await board.hold.wait()
             if board.offline:
                 raise HomeAssistantError("action_call_failed")
             board.sent.append(dict(call.data))
@@ -156,12 +161,34 @@ def fake_air(monkeypatch) -> FakeAir:
     return air
 
 
+# Boards made in the current test. A beating board (the default) sends its heartbeat whenever the
+# fake clock moves, as a real one does every 10 s; tests about a missing heartbeat set beating False.
+_BOARDS: list[FakeBoard] = []
+
+
+@pytest.fixture(autouse=True)
+def _forget_boards():
+    yield
+    _BOARDS.clear()
+
+
 class FakeClock:
     def __init__(self) -> None:
-        self.now = 1000.0
+        self._now = 1000.0
+
+    @property
+    def now(self) -> float:
+        return self._now
+
+    @now.setter
+    def now(self, value: float) -> None:
+        self._now = value
+        for board in _BOARDS:
+            if board.beating and not board.offline:
+                board.beat()
 
     def __call__(self) -> float:
-        return self.now
+        return self._now
 
 
 @pytest.fixture
