@@ -15,8 +15,8 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import HomeAssistant, ServiceResponse, callback
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later
@@ -27,7 +27,8 @@ from . import hub as hub_module
 from .const import DOMAIN, LAMP_ALIASES
 from .entity import LampEntity
 from .planner import Target, plan
-from .state import LampState, nearest_color_temp, nearest_level, snap_color_temp, snap_level
+from .state import LampState, nearest_color_temp, nearest_level, scene_of, snap_color_temp, snap_level
+from .transport import BoardUnavailable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ class BleMeshLight(LampEntity, LightEntity):
 
     @property
     def effect(self) -> str | None:
-        return self.lamp.state.scene
+        return scene_of(self.lamp.profile, self.lamp.state)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -223,7 +224,11 @@ class BleMeshLight(LampEntity, LightEntity):
             ),
         )
 
-    async def async_send_command(self, command: str) -> None:
+    async def async_send_command(self, command: str, queue: bool = False) -> ServiceResponse:
+        """One profile command. With `queue` (the remote card) the press waits its turn and is
+        always sent, and the answer says whether it went out instead of raising: one entity's
+        exception would fail the whole multi-lamp call and drop the others' answers
+        (helpers/service.py, entity_service_call: the first exception is re-raised)."""
         profile = self.lamp.profile
         if command not in profile.commands or command == profile.pairing.command:
             raise ServiceValidationError(
@@ -231,7 +236,26 @@ class BleMeshLight(LampEntity, LightEntity):
                 translation_key="unknown_command",
                 translation_placeholders={"command": command, "commands": ", ".join(self._commands())},
             )
-        await self.hub.async_command(self.subentry_id, command)
+        if not queue:
+            await self.hub.async_command(self.subentry_id, command)
+            return None
+        try:
+            await self.hub.async_press(self.subentry_id, command)
+        except hub_module.PressQueueFull as err:
+            reason, error = "queue_full", err
+        except BoardUnavailable as err:
+            reason, error = "no_board", err
+        except hub_module.HubClosed as err:
+            reason, error = "reloaded", err
+        except HomeAssistantError as err:
+            reason, error = "failed", err
+        except Exception as err:  # noqa: BLE001  (answered, not raised: see above)
+            _LOGGER.exception("%s: %s failed", self.entity_id, command)
+            reason, error = "failed", err
+        else:
+            return {"sent": True}
+        _LOGGER.warning("%s: %s not sent (%s): %s", self.entity_id, command, reason, error)
+        return {"sent": False, "reason": reason, "error": str(error)}
 
     def _commands(self) -> list[str]:
         profile = self.lamp.profile

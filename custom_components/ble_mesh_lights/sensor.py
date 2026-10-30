@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import BleMeshLightsConfigEntry
 from .entity import LampEntity, RemoteEntity, setup_remote_entities
+from .state import scene_of
 
 
 async def async_setup_entry(
@@ -46,7 +47,7 @@ async def async_setup_entry(
 
 
 class SceneSensor(LampEntity, SensorEntity):
-    """The scene the lamp is in; "none" after anything that changed it (or before any scene)."""
+    """The scene the lamp is in, told from its colour temperature and level; "none" otherwise."""
 
     _attr_translation_key = "scene"
     _attr_device_class = SensorDeviceClass.ENUM
@@ -57,7 +58,7 @@ class SceneSensor(LampEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return self.lamp.state.scene or "none"
+        return scene_of(self.lamp.profile, self.lamp.state) or "none"
 
 
 class LevelSensor(LampEntity, SensorEntity):

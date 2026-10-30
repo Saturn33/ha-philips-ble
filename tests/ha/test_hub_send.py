@@ -74,7 +74,7 @@ async def test_scene_cancels_pending_chain(hass, fake_board, hass_storage):
     await first
     assert _sent(fake_board)[-1][2] == "relax"
     assert len(fake_board.sent) <= 3
-    assert hub.lamps[l1].state == LampState(True, 2700, 50, "relax")
+    assert hub.lamps[l1].state == LampState(True, 2700, 50)
 
 
 async def test_send_fails_cleanly_without_board(hass, fake_board, hass_storage):
@@ -184,7 +184,7 @@ async def test_scene_clears_uncertainty(hass, fake_board, hass_storage):
     assert hub.lamps[l1].uncertain is True  # a relative step keeps it uncertain
     await hub.async_command(l1, "relax")
     assert hub.lamps[l1].uncertain is False
-    assert hub.lamps[l1].state == LampState(True, 2700, 50, "relax")
+    assert hub.lamps[l1].state == LampState(True, 2700, 50)
 
 
 async def test_unload_waits_for_a_running_chain(hass, fake_board, hass_storage):
@@ -367,3 +367,87 @@ async def test_two_missed_heartbeats_keep_the_board(hass, make_board, hass_stora
     fake_clock.now += 6
     with pytest.raises(HomeAssistantError):
         await hub.async_power(l1, False)
+
+
+async def test_quick_presses_all_sent(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 3000, 30))
+    await asyncio.gather(*(hub.async_press(l1, "brightness_up") for _ in range(3)))
+    assert [name for _, _, name in _sent(fake_board)] == ["brightness_up"] * 3
+    assert hub.lamps[l1].state == LampState(True, 3000, 100)  # 30 → 50 → 80 → 100
+
+
+async def test_press_cancels_running_chain(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))
+    assert len(plan(VALEN, LampState(True, 3000, 100), Target(True, 2200, 5))) >= 3
+    chain = asyncio.ensure_future(hub.async_set_target(l1, Target(True, 2200, 5)))
+    await wait_for(lambda: len(fake_board.sent) >= 1)
+    await hub.async_press(l1, "off")
+    await chain
+    names = [name for _, _, name in _sent(fake_board)]
+    assert names[-1] == "off" and len(names) <= 3
+    assert hub.lamps[l1].state.on is False
+
+
+async def test_press_queue_limit(hass, fake_board, hass_storage):
+    from custom_components.ble_mesh_lights.hub import PressQueueFull
+
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))
+    presses = [asyncio.ensure_future(hub.async_press(l1, "color_temperature")) for _ in range(10)]
+    await asyncio.sleep(0)  # the ten presses are accepted
+    with pytest.raises(PressQueueFull):
+        await hub.async_press(l1, "color_temperature")
+    await asyncio.gather(*presses)
+    assert len(fake_board.sent) == 10
+
+
+async def test_press_queue_recovers_after_failures(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    fake_board.offline = True
+    results = await asyncio.gather(*(hub.async_press(l1, "on") for _ in range(10)), return_exceptions=True)
+    assert all(isinstance(result, HomeAssistantError) for result in results)
+    fake_board.offline = False
+    await hub.async_press(l1, "on")
+    assert [name for _, _, name in _sent(fake_board)] == ["on"]
+
+
+async def test_failed_press_does_not_stop_the_next(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    fake_board.offline = True
+    first = asyncio.ensure_future(hub.async_press(l1, "off"))
+    second = asyncio.ensure_future(hub.async_press(l1, "on"))
+    await asyncio.sleep(0)
+    with pytest.raises(HomeAssistantError):
+        await first
+    fake_board.offline = False
+    await second
+    assert [name for _, _, name in _sent(fake_board)] == ["on"]
+
+
+async def test_chain_after_presses_waits(hass, fake_board, hass_storage):
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))
+    presses = [asyncio.ensure_future(hub.async_press(l1, "brightness_down")) for _ in range(2)]
+    chain = asyncio.ensure_future(hub.async_set_target(l1, Target(True, 3000, 30)))
+    await asyncio.gather(*presses, chain)
+    names = [name for _, _, name in _sent(fake_board)]
+    assert names[:2] == ["brightness_down", "brightness_down"]
+    assert names[2:] == ["brightness_down"]  # planned from 50 %, where the presses left it
+    assert hub.lamps[l1].state == LampState(True, 3000, 30)
+
+
+async def test_queued_presses_fail_on_unload(hass, fake_board, hass_storage):
+    entry, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    fake_board.hold = asyncio.Event()
+    presses = [asyncio.ensure_future(hub.async_press(l1, "on")) for _ in range(3)]
+    await wait_for(lambda: fake_board.hold is not None and len(presses) == 3)
+    await asyncio.sleep(0)
+    unload = asyncio.ensure_future(hass.config_entries.async_unload(entry.entry_id))
+    await asyncio.sleep(0)
+    fake_board.hold.set()
+    results = await asyncio.gather(*presses, return_exceptions=True)
+    assert await unload
+    assert len(fake_board.sent) <= 1
+    assert all(isinstance(result, HomeAssistantError) for result in results[1:])

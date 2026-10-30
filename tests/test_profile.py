@@ -140,3 +140,68 @@ def test_hints_by_language(valen, tmp_path):
     path.write_text(text.replace(old, ""), encoding="utf-8")
     with pytest.raises(profile.ProfileError):
         profile.load_profile(path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # two scenes with the same parameters: the scene could not be told from them
+        ("color_temp: 3000, level: 100, scene: bright", "color_temp: 2700, level: 50, scene: bright"),
+        # a scene without an absolute effect could never be detected
+        ("scenes: [relax,", "scenes: [\"off\", relax,"),
+    ],
+)
+def test_scene_profile_checks(tmp_path, old, new):
+    text = VALEN.read_text(encoding="utf-8")
+    assert old in text
+    path = tmp_path / "profile.yaml"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    with pytest.raises(profile.ProfileError):
+        profile.load_profile(path)
+
+
+def test_valen_remote_layout_loads(valen):
+    layout = valen.remote_layout
+    assert set(layout["groups"]) == {"power", "ring", "scenes", "bar", "scene_row"}
+    assert set(layout["layouts"]) == {"vertical", "horizontal", "mini"}
+    assert layout["layouts"]["horizontal"] == [["power", "scene_row"], ["ring"]]
+    assert layout["buttons"]["color_temperature"] == {"label": "SELECT", "short": "SEL"}
+
+
+def _remote_copy(tmp_path, change):
+    """The Valen profile with its remote.json changed by `change(layout)`."""
+    folder = tmp_path / "valen"
+    folder.mkdir()
+    (folder / "profile.yaml").write_text(VALEN.read_text(encoding="utf-8"), encoding="utf-8")
+    layout = json.loads((VALEN.parent / "remote.json").read_text(encoding="utf-8"))
+    change(layout)
+    (folder / "remote.json").write_text(json.dumps(layout), encoding="utf-8")
+    return folder / "profile.yaml"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda r: r["groups"]["power"]["buttons"].append("no_such_command"),
+        lambda r: r["groups"]["power"]["buttons"].append("pairing"),
+        lambda r: r["groups"]["ring"].update(up="no_such_command"),
+        lambda r: r["layouts"]["vertical"][0].append("no_such_group"),
+        lambda r: r["layouts"].pop("mini"),
+        lambda r: r["groups"]["power"].update(kind="wheel"),
+        lambda r: r["groups"]["scenes"]["cells"].append(["relax", 4, 1]),
+        lambda r: r["groups"]["scenes"]["cells"].append(["relax", 1, 1]),
+        lambda r: r["layouts"]["vertical"][0].append("power"),
+        lambda r: r["buttons"]["on"].update(colour="red"),
+        lambda r: r["buttons"]["on"].update(icon="fa:power"),
+    ],
+)
+def test_remote_layout_errors(tmp_path, change):
+    path = _remote_copy(tmp_path, change)
+    with pytest.raises(profile.ProfileError) as error:
+        profile.load_profile(path)
+    assert "remote.json" in str(error.value)
+
+
+def test_remote_layout_absent():
+    toggle = profile.load_profile(TESTS / "fixtures" / "profiles" / "toggle" / "profile.yaml")
+    assert toggle.remote_layout is None

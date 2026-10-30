@@ -16,7 +16,6 @@ class LampState:
     on: bool | None
     color_temp: int | None  # kelvin
     level: int | None  # percent
-    scene: str | None = None
 
 
 UNKNOWN = LampState(None, None, None)
@@ -27,7 +26,7 @@ def apply(profile: Profile, state: LampState, command: str) -> LampState:
     if effect is None:
         return state
     if effect.color_temp is not None and effect.level is not None:
-        return LampState(True, effect.color_temp, effect.level, effect.scene)
+        return LampState(True, effect.color_temp, effect.level)
     if effect.power == "on":
         return replace(state, on=True)
     if effect.power == "off":
@@ -42,9 +41,8 @@ def apply(profile: Profile, state: LampState, command: str) -> LampState:
             state,
             color_temp=None if effect.color_temp_step else state.color_temp,
             level=None if (effect.brightness_step or effect.level is not None) else state.level,
-            scene=None,
         )
-    result = replace(state, scene=None)
+    result = state
     if effect.color_temp_step:
         color_temp = _step(profile.color_temps, state.color_temp, effect.color_temp_step)
         result = replace(result, color_temp=color_temp)
@@ -53,6 +51,18 @@ def apply(profile: Profile, state: LampState, command: str) -> LampState:
     if effect.level is not None:
         result = replace(result, level=effect.level)
     return result
+
+
+def scene_of(profile: Profile, state: LampState) -> str | None:
+    """The scene an on lamp is in, told from its colour temperature and level (the profile's scenes
+    never share both), however it got there; None if off or not fully known."""
+    if state.on is not True or state.color_temp is None or state.level is None:
+        return None
+    for scene in profile.scenes:
+        effect = profile.commands[scene].effect
+        if effect is not None and (effect.color_temp, effect.level) == (state.color_temp, state.level):
+            return scene
+    return None
 
 
 def _step(values: tuple[int, ...], current: int | None, step: int) -> int | None:
@@ -79,7 +89,6 @@ def forget(state: LampState, *, level: bool = False, color_temp: bool = False) -
         state,
         level=None if level else state.level,
         color_temp=None if color_temp else state.color_temp,
-        scene=None if (level or color_temp) else state.scene,
     )
 
 

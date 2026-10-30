@@ -28,7 +28,7 @@ def toggle():
 
 
 def test_scene_sets_everything(valen):
-    assert state.apply(valen, S(False, None, None), "nightlight") == S(True, 2700, 10, "nightlight")
+    assert state.apply(valen, S(False, None, None), "nightlight") == S(True, 2700, 10)
 
 
 def test_select_cycles_and_resets_level(valen):
@@ -45,7 +45,7 @@ def test_brightness_steps_clamp(valen):
 
 
 def test_dimming_clears_scene(valen):
-    assert state.apply(valen, S(True, 2700, 50, "relax"), "brightness_up") == S(True, 2700, 80)
+    assert state.apply(valen, S(True, 2700, 50), "brightness_up") == S(True, 2700, 80)
 
 
 def test_off_ignores_dimming(valen):
@@ -71,7 +71,7 @@ def test_apply_press_after_gap(valen):
     # A missed press could have been SELECT or a dimming step: both values become unknown.
     assert state.apply_press(valen, start, "brightness_down", missed=1) == (S(True, None, None), True)
     assert state.apply_press(valen, start, "color_temperature", missed=1) == (S(True, None, 100), True)
-    assert state.apply_press(valen, start, "relax", missed=2) == (S(True, 2700, 50, "relax"), False)
+    assert state.apply_press(valen, start, "relax", missed=2) == (S(True, 2700, 50), False)
     assert state.apply_press(valen, start, "off", missed=1) == (S(False, None, None), True)
     assert state.apply_press(valen, start, "brightness_down", missed=0) == (
         state.apply(valen, start, "brightness_down"),
@@ -133,3 +133,32 @@ def test_snap_level(valen, current, requested, expected):
 )
 def test_snap_color_temp(valen, current, requested, expected):
     assert state.snap_color_temp(valen, requested, current) == expected
+
+
+@pytest.mark.parametrize(
+    ("lamp", "scene"),
+    [
+        (S(True, 2700, 50), "relax"),
+        (S(True, 3000, 100), "bright"),
+        (S(True, 4000, 80), "concentrate"),
+        (S(True, 6500, 50), "energise"),
+        (S(True, 2700, 10), "nightlight"),
+        (S(True, 2700, 30), None),
+        (S(False, 2700, 50), None),
+    ],
+)
+def test_scene_found_by_parameters(valen, lamp, scene):
+    assert state.scene_of(valen, lamp) == scene
+
+
+def test_no_scene_when_level_unknown(valen):
+    assert state.scene_of(valen, S(True, 2700, None)) is None
+    assert state.scene_of(valen, S(None, 2700, 50)) is None
+
+
+def test_scene_back_after_dimming(valen):
+    lamp = state.apply(valen, S(False, None, None), "relax")
+    lamp = state.apply(valen, lamp, "brightness_up")
+    assert state.scene_of(valen, lamp) is None
+    lamp = state.apply(valen, lamp, "brightness_down")
+    assert state.scene_of(valen, lamp) == "relax"

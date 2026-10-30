@@ -26,8 +26,9 @@ async def test_setup_and_unload(hass, fake_board):
 async def test_manifest_loads():
     manifest = json.loads((ROOT / "custom_components/ble_mesh_lights/manifest.json").read_text())
     assert manifest["single_config_entry"] is True
-    assert manifest["dependencies"] == ["bluetooth"]
-    assert manifest["after_dependencies"] == ["esphome"]
+    # http and websocket_api: the remote card's files and its lamps command; frontend only when present.
+    assert manifest["dependencies"] == ["bluetooth", "http", "websocket_api"]
+    assert manifest["after_dependencies"] == ["esphome", "frontend"]
 
 
 async def test_setup_receiver_called_again_on_reconnect(hass, fake_board):

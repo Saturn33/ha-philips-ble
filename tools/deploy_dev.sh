@@ -3,6 +3,7 @@
 #
 #   tools/deploy_dev.sh               copy, then restart Home Assistant
 #   tools/deploy_dev.sh --no-restart  copy only (then reload the entry, e.g. after a translation change)
+#   After changing texts or the remote card, reload the browser page with Ctrl+Shift+R.
 #
 # Settings: tools/deploy.env (copy tools/deploy.env.example; never committed).
 # Needs SSH access to HA: the "Advanced SSH & Web Terminal" or "Terminal & SSH" add-on with your public key.
@@ -16,7 +17,7 @@ restart=1
 for arg in "$@"; do
     case "$arg" in
         --no-restart) restart=0 ;;
-        -h | --help) sed -n '2,8p' "$0"; exit 0 ;;
+        -h | --help) sed -n '2,9p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done

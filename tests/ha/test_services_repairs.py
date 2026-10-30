@@ -9,7 +9,7 @@ from homeassistant.components.repairs import repairs_flow_manager
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -59,6 +59,83 @@ async def test_send_command(hass, fake_board, hass_storage):
         DOMAIN, "send_command", {ATTR_ENTITY_ID: LIGHT, "command": "nightlight"}, blocking=True
     )
     assert [decode_sent(call)[2] for call in fake_board.sent] == ["nightlight"]
+
+
+async def test_send_command_queue_response(hass, fake_board, hass_storage):
+    entry = await setup_entry(
+        hass,
+        [fake_board],
+        lamps=[
+            lamp_subentry(),
+            lamp_subentry(mac="E8:26:CF:00:00:02", address=0x7E02, index=2, title="Patio"),
+        ],
+        hass_storage=hass_storage,
+    )
+    hub = entry.runtime_data
+    l1, l2 = entry.subentries
+    lights = [LIGHT, "light.patio"]
+    answer = await hass.services.async_call(
+        DOMAIN,
+        "send_command",
+        {ATTR_ENTITY_ID: lights, "command": "on", "queue": True},
+        blocking=True,
+        return_response=True,
+    )
+    assert answer == {LIGHT: {"sent": True}, "light.patio": {"sent": True}}
+    assert sorted(decode_sent(call)[0] for call in fake_board.sent) == [0x7E01, 0x7E02]
+
+    # One lamp's queue is full: that lamp says so, the other still gets its command.
+    hub._presses[l2] = 10
+    fake_board.sent.clear()
+    answer = await hass.services.async_call(
+        DOMAIN,
+        "send_command",
+        {ATTR_ENTITY_ID: lights, "command": "off", "queue": True},
+        blocking=True,
+        return_response=True,
+    )
+    assert answer[LIGHT] == {"sent": True}
+    assert answer["light.patio"]["sent"] is False and answer["light.patio"]["reason"] == "queue_full"
+    assert [decode_sent(call)[0] for call in fake_board.sent] == [0x7E01]
+    hub._presses[l2] = 0
+
+    # An unavailable lamp is left out by HA; the other answers.
+    hub.lamps[l2].present = False
+    hub.lamp_changed(l2)
+    await hass.async_block_till_done()
+    answer = await hass.services.async_call(
+        DOMAIN,
+        "send_command",
+        {ATTR_ENTITY_ID: lights, "command": "on", "queue": True},
+        blocking=True,
+        return_response=True,
+    )
+    assert answer == {LIGHT: {"sent": True}}
+
+    # All unavailable: HA refuses a call that asks for a response and matches nothing.
+    hub.lamps[l1].present = False
+    hub.lamp_changed(l1)
+    await hass.async_block_till_done()
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN,
+            "send_command",
+            {ATTR_ENTITY_ID: lights, "command": "on", "queue": True},
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_send_command_queue_rejects_unknown(hass, fake_board, hass_storage):
+    await _setup(hass, [fake_board], hass_storage)
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            "send_command",
+            {ATTR_ENTITY_ID: LIGHT, "command": "pairing", "queue": True},
+            blocking=True,
+            return_response=True,
+        )
 
 
 @pytest.mark.parametrize("command", ["pairing", "no_such_command"])
@@ -134,6 +211,9 @@ async def test_diagnostics(hass, fake_board, hass_storage):
     assert lamp["state"] == {"on": False, "color_temp": 2700, "level": 50, "scene": None}
     assert data["counters"]["0x7e01"] >= 1
     assert data["remotes"] == {} and data["unknown_remotes"] == []
+    await hub.async_power(l1, True)
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["lamps"][0]["state"]["scene"] == "relax"  # 2700 K / 50 %, found from the parameters
 
 
 async def test_disabled_package_sensor_raises_its_own_issue(hass, fake_board, hass_storage):

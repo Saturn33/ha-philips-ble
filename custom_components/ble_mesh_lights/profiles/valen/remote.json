@@ -1,0 +1,30 @@
+{
+  "buttons": {
+    "on": {"label": "ON"},
+    "off": {"label": "OFF"},
+    "color_temperature": {"label": "SELECT", "short": "SEL"},
+    "brightness_up": {"icon": "valen:brighter"},
+    "brightness_down": {"icon": "valen:dimmer"},
+    "relax": {"icon": "valen:relax"},
+    "concentrate": {"icon": "valen:concentrate"},
+    "nightlight": {"icon": "valen:nightlight"},
+    "bright": {"icon": "valen:bright"},
+    "energise": {"icon": "valen:energise"}
+  },
+  "groups": {
+    "power": {"kind": "row", "buttons": ["on", "off"]},
+    "ring": {"kind": "ring", "up": "brightness_up", "down": "brightness_down", "center": "color_temperature"},
+    "scenes": {
+      "kind": "grid",
+      "columns": 3,
+      "cells": [["relax", 1, 1], ["concentrate", 3, 1], ["nightlight", 2, 2], ["bright", 1, 3], ["energise", 3, 3]]
+    },
+    "bar": {"kind": "row", "buttons": ["on", "brightness_down", "color_temperature", "brightness_up", "off"]},
+    "scene_row": {"kind": "row", "buttons": ["relax", "concentrate", "nightlight", "bright", "energise"]}
+  },
+  "layouts": {
+    "vertical": [["power", "ring", "scenes"]],
+    "horizontal": [["power", "scene_row"], ["ring"]],
+    "mini": [["bar", "scene_row"]]
+  }
+}

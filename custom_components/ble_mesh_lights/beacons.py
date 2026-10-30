@@ -65,11 +65,12 @@ class PresenceTracker:
         self._profile = profile
         self._lamps: dict[str, _Lamp] = {}
 
-    def watch(self, mac: str, now: float) -> None:
+    def watch(self, mac: str, now: float, lost: bool = False) -> None:
         """Expect this lamp (a configured one): if no beacon comes within the quiet timeout, it
-        counts as lost, so a lamp without power at HA start does not stay unknown forever."""
+        counts as lost, so a lamp without power at HA start does not stay unknown forever.
+        `lost`: it had no power when the entry stopped; its next active beacon is a restore."""
         if mac not in self._lamps:
-            self._lamps[mac] = _Lamp(now, None, None)
+            self._lamps[mac] = _Lamp(now, None, False if lost else None)
 
     def seen(self, beacon: Beacon, now: float) -> str | None:
         """Record a beacon; RESTORED when a lamp marked lost comes back with an active beacon.

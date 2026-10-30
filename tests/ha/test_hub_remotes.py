@@ -188,6 +188,23 @@ async def test_remote_press_cancels_pending_chain(hass, fake_board, hass_storage
     assert hub.lamps[l1].state.on is False
 
 
+async def test_repeat_scene_press_stops_chain(hass, fake_board, hass_storage):
+    """Any press of a bound remote wins over a waiting chain, even one that leaves the state as it
+    is (the lamp already in the pressed scene)."""
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 2700, 50))
+    await hub.async_bind_remote(R1, [l1])
+    lock = hub._lamp_locks.setdefault(l1, asyncio.Lock())
+    await lock.acquire()
+    chain = asyncio.ensure_future(hub.async_set_target(l1, Target(True, 2200, 5)))
+    await asyncio.sleep(0)
+    fire_raw_adv(hass, remote_press("relax", 0x37AF, 2280), fake_board.device_id)
+    await hass.async_block_till_done()
+    lock.release()
+    await chain
+    assert fake_board.sent == []
+
+
 async def test_subentry_remote_binding_merged(hass, fake_board, hass_storage):
     _, hub, l1 = await _setup(hass, [fake_board], hass_storage, remote=R1)
     assert hub.remotes[R1].lamps == [l1]

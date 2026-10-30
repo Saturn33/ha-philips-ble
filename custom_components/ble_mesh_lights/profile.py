@@ -7,6 +7,7 @@ other commands or levels needs a new profile, not new code.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,6 +105,8 @@ class Profile:
     remote: RemoteRules
     pairing: PairingRules
     beacon: BeaconRules
+    remote_layout: Mapping[str, Any] | None = None  # remote.json: how the remote card draws it
+
 
     def identify(self, payload: bytes) -> str | None:
         for command in self.commands.values():
@@ -254,6 +257,17 @@ def load_profile(path: Path) -> Profile:
         return values
 
     scenes = names("scenes")
+    # The scene is told from the lamp's colour temperature and level (state.scene_of): every scene
+    # must set both, and no two scenes may set the same pair.
+    seen: dict[tuple[int, int], str] = {}
+    for scene in scenes:
+        effect = commands[scene].effect
+        if effect is None or effect.color_temp is None or effect.level is None:
+            raise reader.fail("scenes", f"{scene!r} does not set colour temperature and level")
+        pair = (effect.color_temp, effect.level)
+        if pair in seen:
+            raise reader.fail("scenes", f"{scene!r} and {seen[pair]!r} set the same temperature and level")
+        seen[pair] = scene
     events = names("events")
 
     remote = reader.get(data, "remote", Mapping)
@@ -315,7 +329,72 @@ def load_profile(path: Path) -> Profile:
                 reader.get(beacon, "service_uuid", int, "beacon.") if "service_uuid" in beacon else None
             ),
         ),
+        remote_layout=_remote_layout(path.parent / "remote.json", commands, pairing_rules.command),
     )
+
+
+LAYOUTS = ("vertical", "horizontal", "mini")
+GROUP_KINDS = ("row", "ring", "grid")
+BUTTON_KEYS = {"label", "short", "icon"}
+
+
+def _remote_layout(path: Path, commands: Mapping[str, Command], pairing: str) -> Mapping[str, Any] | None:
+    """The card's layout of the remote (remote.json next to profile.yaml), checked; None if absent."""
+    if not path.exists():
+        return None
+    reader = _Reader(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as err:
+        raise reader.fail("remote.json", f"not JSON: {err}") from None
+
+    def command(value: Any, where: str) -> None:
+        if value not in commands or value == pairing:
+            raise reader.fail(where, f"{value!r} is not a command of the profile")
+
+    for name, button in reader.get(data, "buttons", Mapping).items():
+        command(name, f"buttons.{name}")
+        if not isinstance(button, Mapping) or set(button) - BUTTON_KEYS:
+            raise reader.fail(f"buttons.{name}", f"only {sorted(BUTTON_KEYS)}")
+        icon = button.get("icon")
+        if icon is not None and not (isinstance(icon, str) and icon.startswith(("valen:", "mdi:"))):
+            raise reader.fail(f"buttons.{name}.icon", "must start with valen: or mdi:")
+    groups = reader.get(data, "groups", Mapping)
+    for name, group in groups.items():
+        where = f"groups.{name}"
+        kind = reader.get(group, "kind", str, f"{where}.")
+        if kind not in GROUP_KINDS:
+            raise reader.fail(f"{where}.kind", f"one of {list(GROUP_KINDS)}")
+        if kind == "row":
+            for value in reader.get(group, "buttons", list, f"{where}."):
+                command(value, f"{where}.buttons")
+        elif kind == "ring":
+            for part in ("up", "down", "center"):
+                command(reader.get(group, part, str, f"{where}."), f"{where}.{part}")
+        else:
+            columns = reader.get(group, "columns", int, f"{where}.")
+            taken: set[tuple[int, int]] = set()
+            for cell in reader.get(group, "cells", list, f"{where}."):
+                if not (isinstance(cell, list) and len(cell) == 3):
+                    raise reader.fail(f"{where}.cells", "each cell is [command, column, row]")
+                value, column, row = cell
+                command(value, f"{where}.cells")
+                inside = isinstance(column, int) and isinstance(row, int) and 1 <= column <= columns
+                if not (inside and row >= 1):
+                    raise reader.fail(f"{where}.cells", f"{cell} is outside {columns} columns")
+                if (column, row) in taken:
+                    raise reader.fail(f"{where}.cells", f"two cells at column {column}, row {row}")
+                taken.add((column, row))
+    layouts = reader.get(data, "layouts", Mapping)
+    for name in LAYOUTS:
+        columns = reader.get(layouts, name, list, "layouts.")
+        used = [group for column in columns for group in column]
+        missing = [group for group in used if group not in groups]
+        if missing:
+            raise reader.fail(f"layouts.{name}", f"no such groups: {missing}")
+        if len(used) != len(set(used)):
+            raise reader.fail(f"layouts.{name}", "a group is used twice")
+    return data
 
 
 def load_profiles(root: Path) -> tuple[dict[str, Profile], list[str]]:

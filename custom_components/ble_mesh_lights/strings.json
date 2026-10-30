@@ -386,6 +386,9 @@
     },
     "unknown_effect": {
       "message": "Unknown effect \"{effect}\". Effects: {effects}."
+    },
+    "press_queue_full": {
+      "message": "Too many presses are waiting for this light; try again in a moment."
     }
   },
   "services": {
@@ -414,6 +417,10 @@
         "command": {
           "name": "Command",
           "description": "A command id of the profile, for example relax or brightness_up."
+        },
+        "queue": {
+          "name": "Queue",
+          "description": "Wait for the commands sent to the light before this one, as a remote press does; the answer says whether the command went out."
         }
       }
     },

@@ -229,3 +229,16 @@ async def test_scene_sensor(hass, fake_board, hass_storage):
     assert hass.states.get("light.street").attributes["effect"] == "relax"
     await _press(hass, fake_board, "brightness_down", 2290)
     assert hass.states.get(scene).state == "none"  # no scene any more
+
+
+async def test_scene_entities_follow_parameters(hass, fake_board, hass_storage):
+    from custom_components.ble_mesh_lights.state import LampState
+
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    hub.set_assumed_state(l1, LampState(True, 2700, 50))
+    await hass.async_block_till_done()
+    assert hass.states.get("light.street").attributes["effect"] == "relax"
+    assert hass.states.get("sensor.street_scene").state == "relax"
+    hub.set_assumed_state(l1, LampState(True, 3000, 100))  # what the lamp does at power-on
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.street_scene").state == "bright"

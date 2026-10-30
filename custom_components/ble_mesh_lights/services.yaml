@@ -30,6 +30,10 @@ send_command:
       example: relax
       selector:
         text:
+    queue:
+      default: false
+      selector:
+        boolean:
 
 skip_sequence:
   target:

@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from . import BleMeshLightsConfigEntry, transport
 from . import hub as hub_module
 from .const import PRESENCE_INTERVAL
+from .state import scene_of
 
 
 async def async_get_config_entry_diagnostics(
@@ -37,7 +38,7 @@ async def async_get_config_entry_diagnostics(
                 "mac": lamp.mac,
                 "address": f"0x{lamp.address:04X}",
                 "after_outage": lamp.after_outage,
-                "state": asdict(lamp.state),
+                "state": {**asdict(lamp.state), "scene": scene_of(lamp.profile, lamp.state)},
                 "uncertain": lamp.uncertain,
                 "present": lamp.present,
                 "before_loss": asdict(lamp.before_loss) if lamp.before_loss else None,

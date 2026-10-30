@@ -134,7 +134,7 @@ async def test_full_wizard_creates_lamp(hass, fake_board, hass_storage, fake_air
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "remote_bound"
     hub = entry.runtime_data
     assert hub.remotes["valen:37af"].lamps == [subentry.subentry_id]
-    assert hub.lamps[subentry.subentry_id].state == LampState(True, 2700, 50, "relax")
+    assert hub.lamps[subentry.subentry_id].state == LampState(True, 2700, 50)
 
 
 async def test_lamp_saved_before_the_remote_step(

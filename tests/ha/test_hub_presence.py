@@ -122,6 +122,45 @@ async def test_first_quiet_beacon_after_start_keeps_certainty(
     assert hub.lamps[l1].uncertain is False
 
 
+async def test_lost_lamp_stays_lost_after_reload(hass, fake_board, hass_storage, fake_air, fake_clock):
+    """A lamp switched off at the wall stays "no power" across a reload of the entry: HA still
+    holds its last advert from before the switch-off, which is no new sighting."""
+    entry, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    start = fake_clock.now
+    fake_air.beacon(L1, ACTIVE, start, board=fake_board.device_id)
+    await _tick(hass, hub, fake_clock, start + 2)
+    hub.set_assumed_state(l1, LampState(True, 2700, 10))  # known, not uncertain
+    await _tick(hass, hub, fake_clock, start + 12)
+    assert hub.lamps[l1].present is False
+    fake_air.adverts.pop(L1)  # HA dropped the stale advert meanwhile: nothing tells the lamp is off
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    hub = entry.runtime_data
+    await _tick(hass, hub, fake_clock, fake_clock.now + 6)
+    lamp = hub.lamps[l1]
+    assert lamp.present is False
+    assert lamp.uncertain is False
+    assert hass.states.get("light.street").state == "unavailable"
+    # Power comes back: an active beacon newer than the one held.
+    fake_air.beacon(L1, ACTIVE, fake_clock.now, board=fake_board.device_id)
+    await _tick(hass, hub, fake_clock, fake_clock.now + 2)
+    assert lamp.present is True
+    assert lamp.state == LampState(True, 3000, 100)
+
+
+async def test_cached_advert_at_start_is_no_sighting(hass, fake_board, hass_storage, fake_air, fake_clock):
+    """An advert HA held before the entry started proves nothing about the lamp now."""
+    fake_air.beacon(L1, ACTIVE, fake_clock.now - 100, board=fake_board.device_id)
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    await _tick(hass, hub, fake_clock, fake_clock.now + 6)
+    lamp = hub.lamps[l1]
+    assert lamp.present is None
+    assert lamp.uncertain is False
+    fake_air.beacon(L1, QUIET, fake_clock.now, board=fake_board.device_id)
+    await _tick(hass, hub, fake_clock, fake_clock.now + 2)
+    assert lamp.present is True
+
+
 async def test_lamp_heard_only_by_second_board(hass, make_board, hass_storage, fake_air, fake_clock):
     kitchen = make_board()
     corridor = make_board("ble-proxy-tx-corridor", "BLE Proxy TX (Corridor)")
@@ -162,7 +201,7 @@ async def test_outage_restores_an_on_lamp(hass, fake_board, hass_storage, fake_a
     _, hub, l1 = await _setup(
         hass, [fake_board], hass_storage, options={CONF_OUTAGE_SENSOR: OUTAGE}, after_outage="restore"
     )
-    hub.set_assumed_state(l1, LampState(True, 2700, 50, "relax"))
+    hub.set_assumed_state(l1, LampState(True, 2700, 50))
     start = await _lose_power(hass, hub, l1, fake_air, fake_clock, fake_board)
     hass.states.async_set(OUTAGE, "on")
     fake_air.beacon(L1, ACTIVE, start + 20, board=fake_board.device_id)

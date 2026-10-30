@@ -75,6 +75,7 @@ SAVE_DELAY = 5.0
 OWN_ECHO_WINDOW = 30.0  # seconds: our own advert may come back through another board
 OUTAGE_WINDOW = 600.0  # seconds after an outage in which a returning lamp is restored
 REBIND_WINDOW = 60.0  # seconds after a lamp got power in which a remote's pairing binds it
+PRESS_QUEUE_LIMIT = 10  # card presses waiting for one lamp, the one on the air included
 TX_LISTEN_MARGIN = 0.2  # s: the board resumes listening 150 ms after its last advert
 BOARD_HYSTERESIS = 6  # dB another board must be better by (smoothed) before a lamp moves to it
 BOARD_MIN_DWELL = 30.0  # s on a board before a lamp moves to a better one (not when it is gone)
@@ -96,6 +97,10 @@ class NoAddressLeft(HomeAssistantError):
 
 class HubClosed(HomeAssistantError):
     """The hub was unloaded (the entry reloads or stops): it sends and saves nothing any more."""
+
+
+class PressQueueFull(HomeAssistantError):
+    """Too many card presses are waiting for one lamp."""
 
 
 @dataclass
@@ -125,6 +130,7 @@ class LampRuntime:
     quiet: bool | None = None  # flag of the last beacon
     last_seen: datetime | None = None  # wall-clock time of the last advert
     silent: bool = False  # silent for the power cycle gap while in active mode
+    lost_at_start: bool = False  # without power when the entry stopped, not seen since
 
 
 def _state_to_dict(state: LampState | None) -> dict[str, Any] | None:
@@ -134,7 +140,7 @@ def _state_to_dict(state: LampState | None) -> dict[str, Any] | None:
 def _state_from_dict(data: dict[str, Any] | None) -> LampState | None:
     if not data:
         return None
-    return LampState(data.get("on"), data.get("color_temp"), data.get("level"), data.get("scene"))
+    return LampState(data.get("on"), data.get("color_temp"), data.get("level"))  # a stored "scene" is ignored
 
 
 class Hub:
@@ -163,6 +169,7 @@ class Hub:
         self._lamp_locks: dict[str, asyncio.Lock] = {}
         self._generation: dict[str, int] = {}
         self._running: dict[str, int] = {}  # lamp → generation of the chain that is running
+        self._presses: dict[str, int] = {}  # lamp → card presses accepted and not finished
         self._last_sent: dict[int, float] = {}
         self._last_tx = float("-inf")  # last time a board was sending (it does not listen then)
         self._rssi_avg: dict[tuple[str, str], float] = {}  # (lamp MAC, board) → smoothed RSSI
@@ -234,6 +241,10 @@ class Hub:
                 before_loss=_state_from_dict(stored.get("before_loss")),
                 board=stored.get("board"),
                 after_outage=subentry.data.get(LAMP_AFTER_OUTAGE, "nothing"),
+                # Without power when the entry stopped: stays so until a beacon says otherwise
+                # (a reload or restart must not show it on for the quiet timeout).
+                present=False if stored.get("present") is False else None,
+                lost_at_start=stored.get("present") is False,
             )
 
         self._setup_remotes(lamp_subentries)
@@ -246,7 +257,13 @@ class Hub:
         now = monotonic()
         for lamp in self.lamps.values():
             tracker = self._presence.setdefault(lamp.profile.id, PresenceTracker(lamp.profile))
-            tracker.watch(lamp.mac, now)
+            tracker.watch(lamp.mac, now, lost=lamp.present is False)
+            # HA keeps a lamp's last advert for minutes, and across a restart for remote scanners
+            # (components/bluetooth: the remote scanners' history is stored): one held when the
+            # entry starts proves nothing about the lamp now, so only newer adverts count.
+            held = transport.last_advert(self.hass, lamp.mac)
+            if held is not None:
+                lamp.last_beacon = held[1]
         # A @callback, so HA runs it in the event loop (a plain function would go to a worker thread).
         self._unsubscribe.append(
             async_track_time_interval(self.hass, self._presence_timer, timedelta(seconds=PRESENCE_INTERVAL))
@@ -451,6 +468,7 @@ class Hub:
                 "uncertain": lamp.uncertain,
                 "before_loss": _state_to_dict(lamp.before_loss),
                 "board": lamp.board,
+                "present": lamp.present,
             }
         return {
             **self._stored,
@@ -641,11 +659,31 @@ class Hub:
             if not sent:
                 _LOGGER.debug("%s: chain superseded before %s", lamp.mac, command)
                 return
-            lamp.state = apply(lamp.profile, lamp.state, command)
-            effect = lamp.profile.commands[command].effect
-            if effect is not None and effect.color_temp is not None and effect.level is not None:
-                lamp.uncertain = False  # a scene sets everything: the state is known again
-            self.lamp_changed(subentry_id)
+            self._command_sent(subentry_id, lamp, command)
+
+    def _command_sent(self, subentry_id: str, lamp: LampRuntime, command: str) -> None:
+        lamp.state = apply(lamp.profile, lamp.state, command)
+        effect = lamp.profile.commands[command].effect
+        if effect is not None and effect.color_temp is not None and effect.level is not None:
+            lamp.uncertain = False  # a scene sets everything: the state is known again
+        self.lamp_changed(subentry_id)
+
+    async def async_press(self, subentry_id: str, command: str) -> None:
+        """A press on the card, sent like a remote's: it stops a running chain, then waits for the
+        lamp in arrival order (asyncio.Lock is FIFO) and is always sent; presses never replace each
+        other. At most PRESS_QUEUE_LIMIT per lamp, counting the one on the air."""
+        if self._presses.get(subentry_id, 0) >= PRESS_QUEUE_LIMIT:
+            raise PressQueueFull(translation_domain=DOMAIN, translation_key="press_queue_full")
+        self._presses[subentry_id] = self._presses.get(subentry_id, 0) + 1
+        self.cancel_pending(subentry_id)
+        try:
+            lamp = self.lamps[subentry_id]
+            async with self._lamp_locks.setdefault(subentry_id, asyncio.Lock()):
+                board = self.choose_board(lamp)
+                await self.async_transmit(lamp.profile, lamp.address, command, board)
+                self._command_sent(subentry_id, lamp, command)
+        finally:
+            self._presses[subentry_id] -= 1
 
     def chain_running(self, subentry_id: str) -> bool:
         """A chain for the lamp's current request is running (not one superseded or cancelled)."""
@@ -819,10 +857,13 @@ class Hub:
                     lamp.uncertain = lamp.uncertain or not beacon.quiet
                     self.lamp_changed(lamp.subentry_id)
             elif lamp.present is False:
-                # A quiet beacon after a loss: bursts were missed, the lamp kept its power and state.
+                # A quiet beacon after a loss: bursts were missed, the lamp kept its power and state;
+                # after a loss from before the entry started, how long it has had power is unknown.
                 lamp.present = True
                 lamp.before_loss = None
+                lamp.uncertain = lamp.uncertain or lamp.lost_at_start
                 self.lamp_changed(lamp.subentry_id)
+            lamp.lost_at_start = False
         for tracker in self._presence.values():
             for mac in tracker.expired(now):
                 for lamp in self.lamps.values():
@@ -999,8 +1040,8 @@ class Hub:
                 _LOGGER.debug(
                     "%s: %s → %s%s", lamp.mac, lamp.state, state, " (uncertain)" if uncertain else ""
                 )
+                self.cancel_pending(sub_id)  # the remote wins over a running chain, even a no-op press
                 if state != lamp.state or uncertain != lamp.uncertain:
-                    self.cancel_pending(sub_id)  # the remote wins over a running chain
                     lamp.state, lamp.uncertain = state, uncertain
                     self.lamp_changed(sub_id)
         self.async_schedule_save()

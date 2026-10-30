@@ -17,7 +17,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "ble_mesh_lights"
     assert manifest["config_flow"] is True
-    assert manifest["dependencies"] == ["bluetooth"]
+    assert manifest["dependencies"] == ["bluetooth", "http", "websocket_api"]
     assert manifest["single_config_entry"] is True
     assert hacs["name"] == "BLE Mesh Lights"
 
