@@ -242,3 +242,15 @@ async def test_scene_entities_follow_parameters(hass, fake_board, hass_storage):
     hub.set_assumed_state(l1, LampState(True, 3000, 100))  # what the lamp does at power-on
     await hass.async_block_till_done()
     assert hass.states.get("sensor.street_scene").state == "bright"
+
+
+async def test_renamed_board_shows_at_once(hass, fake_board, hass_storage):
+    """A board renamed in HA (in its YAML, or by hand) shows its new name without a reload."""
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    await hub.async_power(l1, True)  # the lamp now has its transmitting board
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.street_transmitting_proxy").state == "BLE Proxy TX (Kitchen)"
+    dr.async_get(hass).async_update_device(fake_board.device_id, name_by_user="BLE Proxy TX (Salon)")
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.street_transmitting_proxy").state == "BLE Proxy TX (Salon)"
+    assert hub.boards[0].name == "BLE Proxy TX (Salon)"

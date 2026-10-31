@@ -1,4 +1,4 @@
-// Node tests for the pure model of the remote card: node --test tests/card/
+// Node tests for the pure model of the remote card: node --test tests/card/*.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -183,7 +183,7 @@ test("lampsTitle in Russian", () => {
 
 test("fallbackRemote lists the profile commands", () => {
   const remote = M.fallbackRemote(["on", "off", "relax"]);
-  assert.deepEqual(remote.groups, { all: { kind: "row", buttons: ["on", "off", "relax"] } });
+  assert.deepEqual(remote.groups, { all: { kind: "row", wrap: true, buttons: ["on", "off", "relax"] } });
   assert.deepEqual(remote.layouts, { vertical: [["all"]], horizontal: [["all"]], mini: [["all"]] });
   assert.deepEqual(remote.buttons, {});
 });
@@ -199,4 +199,20 @@ test("lampLines lists every lamp with its own line", () => {
     { id: "light.b", name: "Patio", line: "Выключен", uncertain: false },
     { id: "light.c", name: "Hall", line: "Нет питания", uncertain: false },
   ]);
+});
+
+test("cardView: a missing state while loading is loading", () => {
+  // At HA start-up the entity states may come after the card: not "Lamp not found" yet.
+  const c = M.cardView([M.lampView("light.a", undefined, null, false)], { lang: "en" });
+  assert.equal(c.loading, true);
+  assert.equal(c.error, null);
+});
+
+test("cardView reports a lamp whose profile failed", () => {
+  const c = M.cardView([M.lampView("light.a", lamp("unavailable"), null, true, "valen")], { lang: "ru" });
+  assert.equal(c.error, "Профиль не загрузился: valen");
+});
+
+test("fallbackRemote mini wraps", () => {
+  assert.equal(M.fallbackRemote(["on", "off"]).groups.all.wrap, true);
 });

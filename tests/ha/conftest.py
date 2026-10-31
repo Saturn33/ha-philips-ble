@@ -84,6 +84,58 @@ class FakeBoard:
         self.hass.states.async_set(self.version_entity_id, self.version if connected else "unavailable")
 
 
+# HA's own abort reasons, translated by HA (config_entries: async_update_and_abort etc.).
+HA_REASONS = {"reconfigure_successful", "already_configured"}
+
+
+@pytest.fixture(autouse=True)
+def every_flow_step_is_translated(monkeypatch):
+    """test_every_flow_step_is_translated: every screen and abort a flow of the integration showed
+    in the test has its text in strings.json (a renamed step would otherwise show raw ids)."""
+    from homeassistant import config_entries, data_entry_flow
+
+    seen = []
+    original = data_entry_flow.FlowManager._async_handle_step
+
+    async def recording(self, flow, step_id, user_input):
+        result = await original(self, flow, step_id, user_input)
+        module = type(flow).__module__
+        if module.startswith("custom_components.ble_mesh_lights") and not module.endswith(".repairs"):
+            seen.append((flow, result))
+        return result
+
+    monkeypatch.setattr(data_entry_flow.FlowManager, "_async_handle_step", recording)
+    yield
+    strings = json.loads(
+        (ROOT / "custom_components/ble_mesh_lights/strings.json").read_text(encoding="utf-8")
+    )
+    missing = []
+    for flow, result in seen:
+        if isinstance(flow, config_entries.ConfigSubentryFlow):
+            section = strings["config_subentries"]["lamp"]
+        elif isinstance(flow, config_entries.OptionsFlow):
+            section = strings["options"]
+        else:
+            section = strings["config"]
+        kind = result["type"]
+        if kind in (data_entry_flow.FlowResultType.FORM, data_entry_flow.FlowResultType.MENU):
+            step = section.get("step", {}).get(result["step_id"])
+            if step is None:
+                missing.append(f"step.{result['step_id']}")
+            elif kind is data_entry_flow.FlowResultType.MENU:
+                options = result["menu_options"]
+                for option in options if isinstance(options, list) else options.keys():
+                    if option not in step.get("menu_options", {}):
+                        missing.append(f"step.{result['step_id']}.menu_options.{option}")
+        elif kind is data_entry_flow.FlowResultType.SHOW_PROGRESS:
+            if result["progress_action"] not in section.get("progress", {}):
+                missing.append(f"progress.{result['progress_action']}")
+        elif kind is data_entry_flow.FlowResultType.ABORT:
+            if result["reason"] not in section.get("abort", {}) and result["reason"] not in HA_REASONS:
+                missing.append(f"abort.{result['reason']}")
+    assert sorted(set(missing)) == []
+
+
 @pytest.fixture
 def make_board(hass: HomeAssistant):
     """Factory for fake ESPHome boards with the ble-adv-tx actions and version sensor."""

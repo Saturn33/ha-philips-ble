@@ -133,3 +133,19 @@ async def test_new_remote_repair_ignores(hass, fake_board, hass_storage):
     await hass.async_block_till_done()
     await _hear(hass, fake_board, 0x13B3, 200)
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"new_remote_{R2}") is None
+
+
+async def test_remote_labels_translated(hass, fake_board, hass_storage):
+    """The labels are built by the server, so they follow the server language."""
+    hass.config.language = "ru"
+    entry, hub, _, _ = await _setup(hass, fake_board, hass_storage)
+    await _hear(hass, fake_board, 0x37AF)
+    await _hear(hass, fake_board, 0x13B3)
+    hub.ignored_remotes.add(R2)
+    options = hass.config_entries.options
+    result = await options.async_init(entry.entry_id)
+    result = await options.async_configure(result["flow_id"], {"next_step_id": "remotes"})
+    selector = result["data_schema"].schema["remote"]
+    labels = {option["value"]: option["label"] for option in selector.config["options"]}
+    assert labels[R1] == "0x37AF: Новый пульт (Philips Valen series)"
+    assert labels[R2] == "0x13B3: игнорируется (Philips Valen series)"

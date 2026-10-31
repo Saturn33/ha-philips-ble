@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -19,6 +19,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
+    async_track_device_registry_updated_event,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -301,7 +302,7 @@ class Hub:
             if subentry.subentry_id not in remote.lamps:
                 remote.lamps.append(subentry.subentry_id)
         for key in self.remotes:
-            # Heard as unknown before it was bound (e.g. pressed in the wizard before "Finish").
+            # Heard as unknown before it was bound (e.g. pressed while the wizard waited for it).
             ir.async_delete_issue(self.hass, DOMAIN, f"new_remote_{key}")
         stored_trackers = self._stored.get("trackers", {})
         for profile in self.profiles.values():
@@ -329,7 +330,30 @@ class Hub:
             self._unsubscribe.append(
                 async_track_state_change_event(self.hass, list(sensors), self._make_sensor_listener(sensors))
             )
+        if self.boards:
+            # A board renamed in HA (its YAML's friendly_name, or by hand) shows at once, not after
+            # a reload (helpers/event.py, async_track_device_registry_updated_event).
+            self._unsubscribe.append(
+                async_track_device_registry_updated_event(
+                    self.hass, [board.device_id for board in self.boards], self._board_device_updated
+                )
+            )
         self._unsubscribe.append(async_call_later(self.hass, BOARD_READY_GRACE, self._check_boards_ready))
+
+    @callback
+    def _board_device_updated(self, event) -> None:
+        if event.data["action"] != "update":
+            return
+        device = dr.async_get(self.hass).async_get(event.data["device_id"])
+        if device is None:
+            return
+        for index, board in enumerate(self.boards):
+            if board.device_id == device.id:
+                name = transport.board_name(device, board.name)
+                if name != board.name:
+                    self.boards[index] = replace(board, name=name)
+                    for sub_id in self.lamps:
+                        async_dispatcher_send(self.hass, SIGNAL_LAMP.format(sub_id))
 
     @callback
     def _check_boards_ready(self, _now=None) -> None:
@@ -761,22 +785,24 @@ class Hub:
             if self.closed:
                 raise HubClosed("BLE Mesh Lights reloaded")
             for address, raw, advert_time in transport.discovered_beacons(self.hass):
-                mac = address.upper()
-                previous = last_seen.get(mac)
+                heard = address.upper()
+                previous = last_seen.get(heard)
                 if previous is not None and advert_time <= previous:
                     continue
                 if previous is None or advert_time - previous >= NEW_LAMP_GAP:
-                    returned.add(mac)
-                last_seen[mac] = advert_time
-                if mac in configured or mac not in returned or (wanted and mac != wanted):
+                    returned.add(heard)
+                last_seen[heard] = advert_time
+                if heard in configured or heard not in returned or (wanted and heard != wanted):
                     continue
                 beacon = parse_beacon(profile, raw)
-                if beacon is not None and not beacon.quiet and beacon.mac == mac:
-                    return mac
+                if beacon is not None and not beacon.quiet and beacon.mac == heard:
+                    return heard
         raise TimeoutError
 
     async def async_seed_lamp_state(self, mac: str, state: LampState) -> None:
         """What the wizard knows about a lamp it is about to create (used at the next setup)."""
+        if self.closed:
+            raise HubClosed("BLE Mesh Lights reloaded")  # the new hub owns the store now
         self._stored.setdefault("seeds", {})[mac.upper()] = {**asdict(state), "uncertain": False}
         await self._state_store.async_save(self._data_to_store())
 
@@ -1108,8 +1134,11 @@ class Hub:
         ]
 
     async def async_bind_remote(self, key: str, lamps: list[str]) -> None:
-        """Bind a remote to these lamps (replacing its previous lamps)."""
+        """Bind a remote to these lamps (replacing its previous lamps); a bound remote is not ignored."""
+        if self.closed:
+            raise HubClosed("BLE Mesh Lights reloaded")  # the new hub owns the store now
         profile_id, source = key.split(":")
+        self.ignored_remotes.discard(key)
         remote = self.remotes.get(key)
         if remote is None:
             self.remotes[key] = RemoteInfo(key, profile_id, int(source, 16), list(lamps))

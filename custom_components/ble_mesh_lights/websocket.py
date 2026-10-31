@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
-from .const import DOMAIN
+from .const import DOMAIN, LAMP_PROFILE
 
 LABEL_KEY = f"component.{DOMAIN}.entity.event.button_press.state_attributes.event_type.state.{{}}"
 
@@ -39,7 +39,7 @@ async def ws_lamps(
         (e for e in hass.config_entries.async_entries(DOMAIN) if e.state is ConfigEntryState.LOADED), None
     )
     if entry is None:
-        connection.send_result(msg["id"], {"loaded": False, "lamps": {}})
+        connection.send_result(msg["id"], {"loaded": False, "lamps": {}, "failed": {}})
         return
     hub = entry.runtime_data
     names = await translation.async_get_translations(
@@ -47,9 +47,15 @@ async def ws_lamps(
     )
     wanted = msg.get("entity_ids")
     lamps: dict[str, Any] = {}
+    failed: dict[str, str] = {}  # lamps whose profile failed to load → that profile's id
     for item in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id):
+        if item.domain != "light" or (wanted is not None and item.entity_id not in wanted):
+            continue
         lamp = hub.lamps.get(item.config_subentry_id or "")
-        if item.domain != "light" or lamp is None or (wanted is not None and item.entity_id not in wanted):
+        if lamp is None:
+            subentry = entry.subentries.get(item.config_subentry_id or "")
+            if subentry is not None:
+                failed[item.entity_id] = subentry.data[LAMP_PROFILE]
             continue
         profile = lamp.profile
         commands = [name for name in profile.commands if name != profile.pairing.command]
@@ -60,4 +66,4 @@ async def ws_lamps(
             "remote": profile.remote_layout,
             "labels": {name: names.get(LABEL_KEY.format(name), name) for name in commands},
         }
-    connection.send_result(msg["id"], {"loaded": True, "lamps": lamps})
+    connection.send_result(msg["id"], {"loaded": True, "lamps": lamps, "failed": failed})

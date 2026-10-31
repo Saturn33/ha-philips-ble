@@ -123,21 +123,26 @@ def test_unexpected_error_in_one_profile_does_not_stop_others(tmp_path):
     assert len(errors) == 1 and "bad" in errors[0]
 
 
-def test_hints_by_language(valen, tmp_path):
-    assert "«Вкл»" in valen.pairing.hint("remote", "ru")
-    assert "любую кнопку" in valen.pairing.hint("remote", "ru")
-    assert "press and hold ON" in valen.pairing.hint("remote", "de")
-    assert "Пять раз" in valen.pairing.hint("reset", "ru")
-    assert "five times" in valen.pairing.hint("reset", "en")
-
-    toggle = profile.load_profile(TESTS / "fixtures" / "profiles" / "toggle" / "profile.yaml")
-    assert toggle.pairing.hint("reset", "ru") == toggle.pairing.hint("reset", "en") != ""
-
+def test_profile_names_its_text_set(valen, tmp_path):
+    assert valen.texts == "valen"
     text = VALEN.read_text(encoding="utf-8")
-    old = '    en: "Switch the light off and on at the wall five times quickly."\n'
+    path = tmp_path / "profile.yaml"
+    path.write_text(text.replace("texts: valen\n", ""), encoding="utf-8")
+    assert profile.load_profile(path).texts == "valen"  # defaults to the profile id
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("texts: valen\n", "texts: Valen-2\n"),  # becomes part of step ids and translation keys
+        ("  after_power_on: true\n", "  after_power_on: true\n  reset_hint: \"Switch it off and on.\"\n"),
+    ],
+)
+def test_text_set_checks(tmp_path, old, new):
+    text = VALEN.read_text(encoding="utf-8")
     assert old in text
     path = tmp_path / "profile.yaml"
-    path.write_text(text.replace(old, ""), encoding="utf-8")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
     with pytest.raises(profile.ProfileError):
         profile.load_profile(path)
 
@@ -205,3 +210,13 @@ def test_remote_layout_errors(tmp_path, change):
 def test_remote_layout_absent():
     toggle = profile.load_profile(TESTS / "fixtures" / "profiles" / "toggle" / "profile.yaml")
     assert toggle.remote_layout is None
+
+
+def test_remote_layout_row_wrap(tmp_path):
+    path = _remote_copy(tmp_path, lambda r: r["groups"]["power"].update(wrap=True))
+    assert profile.load_profile(path).remote_layout["groups"]["power"]["wrap"] is True
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    path = _remote_copy(bad, lambda r: r["groups"]["power"].update(wrap="yes"))
+    with pytest.raises(profile.ProfileError):
+        profile.load_profile(path)

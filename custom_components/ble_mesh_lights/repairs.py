@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 
 from .config_flow import lamps_schema
 from .const import LAMP_ADDRESS, STORAGE_SEQUENCE, STORAGE_VERSION, SUBENTRY_LAMP
-from .hub import Hub
+from .hub import Hub, HubClosed
 from .sequence import VERSION as SEQUENCE_VERSION
 
 # Above any counter a lamp has seen in normal use, including earlier skips forward.
@@ -77,7 +77,10 @@ class NewRemoteFlow(RepairsFlow):
         if hub is None:
             return self.async_abort(reason="not_loaded")
         if user_input is not None:
-            await hub.async_bind_remote(self._key, list(user_input.get("lamps", [])))
+            try:
+                await hub.async_bind_remote(self._key, list(user_input.get("lamps", [])))
+            except HubClosed:
+                return self.async_abort(reason="not_loaded")
             return self.async_create_entry(data={})
         return self.async_show_form(
             step_id="bind",

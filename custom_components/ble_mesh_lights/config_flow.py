@@ -179,7 +179,17 @@ class BleMeshLightsOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="init", menu_options=["settings", "remotes"])
 
-    def _remote_choices(self, hub: Hub) -> list[selector.SelectOptionDict]:
+    async def _remote_choices(self, hub: Hub) -> list[selector.SelectOptionDict]:
+        # Built by the server, so in the server language: an options flow does not know its user
+        # either (helpers/data_entry_flow.py, get_context). Keys: selector.remote_label.options.*.
+        texts = await translation.async_get_translations(
+            self.hass, self.hass.config.language, "selector", [DOMAIN]
+        )
+
+        def label_of(kind: str, **values: str) -> str:
+            text = texts.get(f"component.{DOMAIN}.selector.remote_label.options.{kind}", kind)
+            return text.format(**values)
+
         titles = {sub_id: sub.title for sub_id, sub in self.config_entry.subentries.items()}
 
         def profile_name(key: str) -> str:
@@ -203,10 +213,10 @@ class BleMeshLightsOptionsFlow(OptionsFlow):
                 and key not in hub.ignored_remotes
                 and now - heard < UNKNOWN_REMOTE_WINDOW
             ):
-                label = f"{address(key)}: New remote ({profile_name(key)})"
+                label = f"{address(key)}: {label_of('new', profile=profile_name(key))}"
                 choices.append(selector.SelectOptionDict(value=key, label=label))
         for key in sorted(hub.ignored_remotes):
-            label = f"{address(key)}: ignored ({profile_name(key)})"
+            label = f"{address(key)}: {label_of('ignored', profile=profile_name(key))}"
             choices.append(selector.SelectOptionDict(value=key, label=label))
         return choices
 
@@ -217,7 +227,7 @@ class BleMeshLightsOptionsFlow(OptionsFlow):
         if user_input is not None:
             self._remote = user_input["remote"]
             return await self.async_step_remote_action()
-        choices = self._remote_choices(hub)
+        choices = await self._remote_choices(hub)
         if not choices:
             return self.async_abort(reason="no_remotes")
         schema = vol.Schema(
@@ -245,7 +255,10 @@ class BleMeshLightsOptionsFlow(OptionsFlow):
         if hub is None or self._remote is None:
             return self.async_abort(reason="not_loaded")
         if user_input is not None:
-            await hub.async_bind_remote(self._remote, list(user_input.get("lamps", [])))
+            try:
+                await hub.async_bind_remote(self._remote, list(user_input.get("lamps", [])))
+            except HubClosed:
+                return self.async_abort(reason="not_loaded")
             # Not create_entry: that would replace the options and reload the entry.
             return self.async_abort(reason="remotes_updated")
         current = hub.remotes[self._remote].lamps if self._remote in hub.remotes else []
@@ -290,6 +303,13 @@ class BleMeshLightsOptionsFlow(OptionsFlow):
         )
 
 
+# Steps whose text holds a profile's hint (factory reset, remote pairing). They are shown as
+# `<step>_<profile.texts>`, a variant written out in the translations, so the frontend shows the
+# hint in the user's language (a flow does not know its user: helpers/data_entry_flow.py,
+# get_context; and a custom integration cannot reference another translation key).
+VARIANT_STEPS = frozenset({"remote_pair", "pair_again", "settings", "test_failed"})
+
+
 class LampSubentryFlow(ConfigSubentryFlow):
     """Add a lamp: find it by a power cycle, pair HA's address, test, save; then optionally bind
     the remote the user presses. Reconfigure: the lamp's settings, or pair it again."""
@@ -303,6 +323,7 @@ class LampSubentryFlow(ConfigSubentryFlow):
         self._sub_id: str | None = None  # the saved lamp (after the test, or the reconfigured one)
         self._again = False  # pairing an existing lamp again
         self._heard: tuple[str, str] | None = None  # (remote key, command) of the caught press
+        self._heard_bound = False  # the remote already controlled this lamp when it was caught
         self._task: asyncio.Task | None = None
         self._error = ""
 
@@ -328,14 +349,23 @@ class LampSubentryFlow(ConfigSubentryFlow):
             except HubClosed:
                 await hub_module.sleep(RELOAD_POLL)
 
+    def __getattr__(self, name: str) -> Any:
+        """A submitted variant step (`async_step_remote_pair_valen`) goes to its base handler. HA
+        looks a step up with getattr/hasattr (data_entry_flow.py, _async_handle_step and
+        _raise_if_step_does_not_exist), so anything else must stay an AttributeError."""
+        profile = self.__dict__.get("_profile")  # never self._profile: no recursion before __init__
+        if profile is not None and name.startswith("async_step_") and name.endswith(f"_{profile.texts}"):
+            base = name.removeprefix("async_step_").removesuffix(f"_{profile.texts}")
+            if base in VARIANT_STEPS:
+                return getattr(self, f"async_step_{base}")
+        raise AttributeError(name)
+
+    def _variant(self, base: str) -> str:
+        """The step id to show: the profile's variant, or the base (settings of a lamp without a profile)."""
+        return f"{base}_{self._profile.texts}" if self._profile is not None else base
+
     def _placeholders(self) -> dict[str, str]:
-        profile, language = self._profile, self.hass.config.language
-        return {
-            "name": self._input.get("name", ""),
-            "reset_hint": profile.pairing.hint("reset", language) if profile else "",
-            "remote_hint": profile.pairing.hint("remote", language) if profile else "",
-            "error": self._error,
-        }
+        return {"name": self._input.get("name", ""), "error": self._error}
 
     async def _progress(self, step_id: str, job, outcomes: dict[type[BaseException], str], done: str):
         """Run `job` as this step's progress task; then go to `done`, or to the step that
@@ -384,7 +414,8 @@ class LampSubentryFlow(ConfigSubentryFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="user", data_schema=schema)
+        # Not the last step: the button reads Next (data_entry_flow.py, async_show_form last_step).
+        return self.async_show_form(step_id="user", data_schema=schema, last_step=False)
 
     async def _detect_and_pair(self) -> None:
         """One task, so the lamp's pairing window right after power-on is not lost waiting for
@@ -442,6 +473,7 @@ class LampSubentryFlow(ConfigSubentryFlow):
             return await self.async_step_power_cycle()
         return self.async_show_form(
             step_id="power_cycle_timeout",
+            last_step=False,
             data_schema=vol.Schema({}),
             description_placeholders=self._placeholders(),
         )
@@ -494,27 +526,25 @@ class LampSubentryFlow(ConfigSubentryFlow):
 
     async def async_step_test_failed(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         return self.async_show_menu(
-            step_id="test_failed",
+            step_id=self._variant("test_failed"),
             menu_options=["test", "power_cycle", "reset_abort"],
             description_placeholders=self._placeholders(),
         )
 
     async def async_step_reset_abort(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        return self.async_abort(reason="reset_needed", description_placeholders=self._placeholders())
+        reason = "reset_needed_again" if self._again else "reset_needed"
+        return self.async_abort(reason=self._variant(reason), description_placeholders=self._placeholders())
 
     async def async_step_save(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """The test passed: save a new lamp now, so closing the dialog later keeps it."""
         if self._again:
             return await self.async_step_remote()
-        hub, profile = self._hub(), self._profile
-        if hub is None:
-            return self.async_abort(reason="not_loaded")
+        profile = self._profile
         assert profile is not None and self._mac is not None
         # Just powered on, then off and on by the test.
         state = power_restored(profile)
         for command in ("off", "on"):
             state = apply(profile, state, command)
-        await hub.async_seed_lamp_state(self._mac, state)
         data = {
             LAMP_PROFILE: profile.id,
             LAMP_MAC: self._mac,
@@ -536,7 +566,21 @@ class LampSubentryFlow(ConfigSubentryFlow):
         # _async_set_next_flow_if_valid: "next_flow only supports FlowType.CONFIG_FLOW"), so the
         # lamp is added here (ConfigEntries.async_add_subentry) and the flow goes on to the remote.
         # The entry reloads for the new lamp; _with_hub waits for a hub that has it.
-        self.hass.config_entries.async_add_subentry(self._get_entry(), subentry)
+        mac = self._mac
+
+        async def seed_and_add(hub: Hub) -> None:
+            # One job on a running hub: added during a reload's setup, the lamp would be missed by
+            # the new hub (Hub.async_setup reads entry.subentries at its start, and the entry's
+            # update listener is registered only after setup, __init__.py).
+            await hub.async_seed_lamp_state(mac, state)
+            if hub.closed or self._hub() is not hub:
+                raise HubClosed("BLE Mesh Lights reloaded")
+            self.hass.config_entries.async_add_subentry(self._get_entry(), subentry)
+
+        try:
+            await self._with_hub(seed_and_add)
+        except HomeAssistantError:
+            return self.async_abort(reason="not_loaded")
         self._sub_id = subentry.subentry_id
         return await self.async_step_remote()
 
@@ -551,16 +595,26 @@ class LampSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             return await self.async_step_remote_press()
         return self.async_show_form(
-            step_id="remote_pair", data_schema=vol.Schema({}), description_placeholders=self._placeholders()
+            step_id=self._variant("remote_pair"),
+            data_schema=vol.Schema({}),
+            description_placeholders=self._placeholders(),
+            last_step=False,
         )
 
     async def _wait_for_remote_press(self) -> None:
         profile = self._profile
         if profile is None:
             raise HomeAssistantError("BLE Mesh Lights is not loaded")
-        self._heard = await self._with_hub(
-            lambda hub: hub.async_wait_for_remote_press(profile, REMOTE_BUTTON_TIMEOUT)
-        )
+
+        async def wait(hub: Hub) -> tuple[str, str]:
+            heard = await hub.async_wait_for_remote_press(profile, REMOTE_BUTTON_TIMEOUT)
+            # Did the remote already control this lamp when the press came? Then the press was
+            # applied as it came, and later presses too: Bind must not put the scene back.
+            remote = hub.remotes.get(heard[0])
+            self._heard_bound = remote is not None and self._sub_id in remote.lamps
+            return heard
+
+        self._heard = await self._with_hub(wait)
 
     async def async_step_remote_press(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         return await self._progress(
@@ -617,7 +671,8 @@ class LampSubentryFlow(ConfigSubentryFlow):
             effect = lamp.profile.commands[command].effect
             # A scene sets the whole state; the light obeyed it (the remote's pairing mode had
             # ended), so HA follows. Any other button only binds.
-            if effect is not None and effect.color_temp is not None and effect.level is not None:
+            scene = effect is not None and effect.color_temp is not None and effect.level is not None
+            if scene and not self._heard_bound:
                 hub.set_assumed_state(sub_id, apply(lamp.profile, lamp.state, command))
 
         try:
@@ -631,19 +686,26 @@ class LampSubentryFlow(ConfigSubentryFlow):
         return self.async_abort(reason=reason, description_placeholders=self._placeholders())
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry()
-        hub = self._hub()
-        self._profile = hub.profiles.get(subentry.data[LAMP_PROFILE]) if hub else None
-        self._input = {"name": subentry.title}
+        self._input = {"name": self._get_reconfigure_subentry().title}
+        self._find_profile()
         return self.async_show_menu(
             step_id="reconfigure",
             menu_options=["settings", "pair_again"],
             description_placeholders=self._placeholders(),
         )
 
+    def _find_profile(self) -> None:
+        """The reconfigured lamp's profile, looked up again on each screen: the menu may have been
+        opened while the entry was reloading (no hub yet)."""
+        hub = self._hub()
+        if hub is not None:
+            self._profile = hub.profiles.get(self._get_reconfigure_subentry().data[LAMP_PROFILE])
+
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         entry = self._get_entry()
         subentry = self._get_reconfigure_subentry()
+        if user_input is None:
+            self._find_profile()
         if user_input is not None:
             data = dict(subentry.data)
             if LAMP_AFTER_OUTAGE in user_input:
@@ -661,16 +723,23 @@ class LampSubentryFlow(ConfigSubentryFlow):
                 )
             )
         return self.async_show_form(
-            step_id="settings", data_schema=vol.Schema(fields), description_placeholders=self._placeholders()
+            step_id=self._variant("settings"),
+            data_schema=vol.Schema(fields),
+            description_placeholders=self._placeholders(),
         )
 
     async def async_step_pair_again(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """After a factory reset: pair the lamp's own address again, keeping the lamp."""
-        if self._profile is None:
+        if self._hub() is None:
             return self.async_abort(reason="not_loaded")
         if user_input is None:
+            self._find_profile()
+        if self._profile is None:
+            return self.async_abort(reason="profile_failed")
+        if user_input is None:
             return self.async_show_form(
-                step_id="pair_again",
+                step_id=self._variant("pair_again"),
+                last_step=False,
                 data_schema=vol.Schema({}),
                 description_placeholders=self._placeholders(),
             )

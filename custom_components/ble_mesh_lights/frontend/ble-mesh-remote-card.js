@@ -35,6 +35,7 @@ const STRINGS = {
     uncertain: "State uncertain: the light may look different (a missed remote press or a switch at the wall)",
     notFound: (id) => `Lamp not found: ${id}`,
     notLamp: (id) => `Not a BLE Mesh lamp: ${id}`,
+    profileFailed: (profile) => `Profile failed to load: ${profile}`,
     mixed: "Lamps of different types",
     notSent: "Not sent",
     reasons: {
@@ -67,6 +68,7 @@ const STRINGS = {
     uncertain: "Состояние под вопросом: светильник может выглядеть иначе (пропущено нажатие пульта или щёлкнули выключателем)",
     notFound: (id) => `Лампа не найдена: ${id}`,
     notLamp: (id) => `Не лампа BLE Mesh: ${id}`,
+    profileFailed: (profile) => `Профиль не загрузился: ${profile}`,
     mixed: "Лампы разных типов",
     notSent: "Не отправлено",
     reasons: {
@@ -116,7 +118,7 @@ const RemoteModel = {
   },
 
   /** One lamp as the card needs it, from its HA state and the integration's info about it. */
-  lampView(entityId, stateObj, info, loaded) {
+  lampView(entityId, stateObj, info, loaded, failedProfile = null) {
     const attrs = (stateObj && stateObj.attributes) || {};
     const levels = (info && info.brightness_levels) || [];
     const on = !!stateObj && stateObj.state === "on";
@@ -129,9 +131,11 @@ const RemoteModel = {
       profile: info ? info.profile : null,
       levels,
       labels: (info && info.labels) || {},
-      missing: !stateObj,
-      loading: !!stateObj && !info && !loaded,
-      notLamp: !!stateObj && !info && !!loaded,
+      // Until the integration answers, a missing state may just not be there yet (HA start-up).
+      missing: !stateObj && !!loaded && !failedProfile,
+      loading: !info && !loaded,
+      failedProfile: !info && loaded ? failedProfile : null,
+      notLamp: !!stateObj && !info && !!loaded && !failedProfile,
       available: !!stateObj && stateObj.state !== "unavailable",
       on,
       kelvin,
@@ -160,6 +164,8 @@ const RemoteModel = {
     };
     const missing = views.find((v) => v.missing);
     const notLamp = views.find((v) => v.notLamp);
+    const failed = views.find((v) => v.failedProfile);
+    if (failed) return { ...result, error: t.profileFailed(failed.failedProfile) };
     if (missing) return { ...result, error: t.notFound(missing.id) };
     if (notLamp) return { ...result, error: t.notLamp(notLamp.id) };
     if (views.some((v) => v.loading)) return { ...result, loading: true, line: t.loading };
@@ -243,7 +249,7 @@ const RemoteModel = {
   fallbackRemote(commands) {
     return {
       buttons: {},
-      groups: { all: { kind: "row", buttons: [...commands] } },
+      groups: { all: { kind: "row", wrap: true, buttons: [...commands] } },
       layouts: { vertical: [["all"]], horizontal: [["all"]], mini: [["all"]] },
     };
   },
@@ -337,6 +343,7 @@ const STYLE = `
   .column { display: flex; flex-direction: column; gap: 12px; align-items: stretch; min-width: 0; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
   .mini .row { flex-wrap: nowrap; }
+  .mini .row.wrap { flex-wrap: wrap; }
   .mini .row .k { flex: 1; min-width: 0; }
   .grid { display: grid; gap: 8px; justify-items: center; }
   button.k { font: 500 12px/1 var(--paper-font-body1_-_font-family, inherit); letter-spacing: .06em;
@@ -466,16 +473,23 @@ class BleMeshRemoteCard extends CardBase {
     if (!this._hass || this._fetching || this._config.entities.length === 0) return;
     this._fetching = true;
     clearTimeout(this._retryTimer);
+    const key = this._infoKey;
+    let info = null;
     try {
-      this._info = await this._hass.callWS({
+      info = await this._hass.callWS({
         type: `${DOMAIN}/lamps`,
         entity_ids: this._config.entities,
         language: this._hass.language,
       });
     } catch (err) {
-      this._info = null; // e.g. the integration is still starting: the command does not exist yet
+      info = null; // e.g. the integration is still starting: the command does not exist yet
     }
     this._fetching = false;
+    if (key !== this._infoKey) {
+      this._fetch(); // the lamps or the language changed meanwhile: this answer is for the old ones
+      return;
+    }
+    this._info = info;
     if (!this._connected) {
       this._retryTimer = null; // a detached card does not poll; connectedCallback starts again
     } else if (!this._info || !this._info.loaded) {
@@ -496,9 +510,9 @@ class BleMeshRemoteCard extends CardBase {
   }
 
   _views() {
-    const info = this._info || { loaded: false, lamps: {} };
+    const info = this._info || { loaded: false, lamps: {}, failed: {} };
     return this._config.entities.map((id) =>
-      RemoteModel.lampView(id, this._hass.states[id], info.lamps[id], !!info.loaded),
+      RemoteModel.lampView(id, this._hass.states[id], info.lamps[id], !!info.loaded, (info.failed || {})[id]),
     );
   }
 
@@ -633,7 +647,9 @@ class BleMeshRemoteCard extends CardBase {
     };
     const group = (name) => {
       const spec = remote.groups[name];
-      if (spec.kind === "row") return `<div class="row">${spec.buttons.map((c) => key(c)).join("")}</div>`;
+      if (spec.kind === "row") {
+        return `<div class="row ${spec.wrap ? "wrap" : ""}">${spec.buttons.map((c) => key(c)).join("")}</div>`;
+      }
       if (spec.kind === "ring") {
         const half = (command, cls) => {
           const label = escapeHtml(this._labels[command] || command);
@@ -657,7 +673,8 @@ class BleMeshRemoteCard extends CardBase {
     // Only lamps HA has available: HA would skip the others with a warning on every press,
     // and refuse a call that asks for a response and matches nothing (helpers/service.py).
     const targets = entities.filter((id) => this._hass.states[id] && this._hass.states[id].state !== "unavailable");
-    let response = null;
+    // No lamp to send to: every lamp is "no power" (an empty answer), not a failed call.
+    let response = targets.length ? null : {};
     let error = null;
     if (targets.length) {
       try {

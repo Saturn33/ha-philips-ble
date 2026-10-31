@@ -43,4 +43,20 @@ async def test_lamps_command_while_reloading(hass, hass_ws_client, fake_board, h
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     result = await _lamps(hass, hass_ws_client, entity_ids=["light.street"])
-    assert result == {"loaded": False, "lamps": {}}
+    assert result == {"loaded": False, "lamps": {}, "failed": {}}
+
+
+async def test_lamps_command_lists_failed_profiles(
+    hass, hass_ws_client, fake_board, hass_storage, tmp_path, monkeypatch
+):
+    """A lamp whose profile failed to load is named with its profile, not left out silently."""
+    from custom_components.ble_mesh_lights import hub as hub_module
+
+    entry = await setup_entry(hass, [fake_board], lamps=[lamp_subentry()], hass_storage=hass_storage)
+    monkeypatch.setattr(hub_module, "PROFILES_DIR", tmp_path)  # no profile at all after the reload
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    result = await _lamps(hass, hass_ws_client, entity_ids=["light.street"])
+    assert result["loaded"] is True
+    assert result["lamps"] == {}
+    assert result["failed"] == {"light.street": "valen"}

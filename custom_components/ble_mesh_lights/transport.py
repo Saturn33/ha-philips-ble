@@ -59,9 +59,13 @@ async def async_boards(hass: HomeAssistant, device_ids: list[str]) -> list[Board
             continue
         entry = hass.config_entries.async_get_entry(device.config_entry_id)
         if entry is not None and entry.domain == ESPHOME and entry.data.get("device_name"):
-            name = device.name_by_user or device.name or entry.title
-            boards.append(Board(device_id, name, entry.data["device_name"]))
+            boards.append(Board(device_id, board_name(device, entry.title), entry.data["device_name"]))
     return boards
+
+
+def board_name(device: dr.DeviceEntry, fallback: str) -> str:
+    """The name HA shows for the board's device."""
+    return device.name_by_user or device.name or fallback
 
 
 def _package_entity(hass: HomeAssistant, board: Board) -> er.RegistryEntry | None:

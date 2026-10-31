@@ -97,10 +97,18 @@ With an outage sensor in the options and a lamp set to "Restore previous state":
 **When it matters:** use the option only with a sensor that turns on when mains power comes back, before the lamps are back, and turns off again afterwards (a pulse), or leave the lamps at "Do nothing".
 
 
-## The wizard's reset and remote hints follow the server language
+## Texts the server builds from names follow the server language
 
-The factory-reset hint and the remote's pairing steps come from the lamp's profile and are filled into the wizard's text by the server, in Home Assistant's server language (Settings → System → General). The rest of the wizard follows each user's profile language. With the two languages different, the hints show in the other language: for example English steps inside the Russian "Pair again" and remote screens. A flow does not know which user opened it, so the server cannot pick the user's language.
+Two texts are put together by the server from names, so they are in Home Assistant's server language (Settings → System → General), while the rest of the dialog follows each user's profile language: the button name on the wizard's "Heard remote …, button …" screen, and the remote labels in Options → Remotes ("New remote (…)", "ignored (…)"). A flow does not know which user opened it, so the server cannot pick the user's language. The wizard's reset and remote-pairing hints are no longer affected: since 0.4.0 they are translated step variants per profile.
 
-**Why it stays:** the fix (a set of translated step variants per profile) is planned for the next version; 0.2.0 has one profile.
+**Why it stays:** the names are dynamic (a button of the remote that was pressed, a profile's name), so they cannot be written out in the translations like the hints; the owner accepted it.
 
-**When it matters:** users whose profile language differs from the server language. Until then, set both to the same language.
+**When it matters:** users whose profile language differs from the server language. Set both to the same language to avoid it.
+
+## The remote card is missing in a dashboard opened before the integration loaded
+
+The card's file is served by BLE Mesh Lights itself, and the frontend loads such extra files when the page opens. A dashboard opened while Home Assistant starts, before BLE Mesh Lights has loaded, shows "Custom element doesn't exist: ble-mesh-remote-card" instead of the card, and keeps showing it after the integration has loaded.
+
+**Why it stays:** this is how custom cards served by an integration are loaded (the Ferroli card behaves the same); the card's own code is not in the browser at that moment, so it cannot help.
+
+**When it matters:** right after an HA restart. Reload the page (F5) once BLE Mesh Lights is loaded.

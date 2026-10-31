@@ -1,6 +1,8 @@
 # Philips Valen series (CL650 AIO R). Facts and measurements: docs/PROTOCOL.md.
 id: valen
 name: Philips Valen series
+# The wizard's texts for this light (reset, remote pairing): step variants *_valen in the translations.
+texts: valen
 manufacturer: Philips
 model: Valen ceiling light
 
@@ -37,13 +39,6 @@ pairing:
   requests: 20
   interval: 0.5
   after_power_on: true
-  reset_hint:
-    en: "Switch the light off and on at the wall five times quickly."
-    ru: "Пять раз быстро выключите и включите светильник выключателем."
-  # The remote's own pairing, shown by the wizard; any button ends the remote's pairing mode.
-  remote_hint:
-    en: "1. Switch the light off and on at the wall.\n2. Right away, press and hold ON on the remote until the light blinks.\n3. Release ON and press any button on the remote, for example OFF, to end pairing. While the remote's LED is on, the light ignores every command."
-    ru: "1. Выключите и включите светильник выключателем.\n2. Сразу зажмите на пульте «Вкл» и держите, пока светильник не мигнёт.\n3. Отпустите «Вкл» и нажмите на пульте любую кнопку, например «Выкл»: это завершит сопряжение. Пока горит светодиод пульта, светильник не слушается никаких команд."
 
 # Unprovisioned device beacon (AD 0x2B). Offsets are into the AD value:
 # uuid_prefix = beacon type 00 + first 7 UUID bytes; then the reversed BLE address;

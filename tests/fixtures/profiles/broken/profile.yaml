@@ -1,6 +1,7 @@
 # Test profile with an error: a scene that is not a command.
 id: broken
 name: Philips Valen series
+texts: valen
 manufacturer: Philips
 model: Valen ceiling light
 
@@ -32,7 +33,7 @@ events: ["on", "off", brightness_up, brightness_down, color_temperature, relax, 
 # A remote sends as the low 15 bits of its BLE address and advances its sequence by 10 per press.
 remote: {address: mac_low15, sequence_step: 10}
 
-pairing: {command: pairing, requests: 20, interval: 0.5, after_power_on: true, reset_hint: "Switch the light off and on at the wall five times quickly.", remote_hint: "Pair the remote as its manual says."}
+pairing: {command: pairing, requests: 20, interval: 0.5, after_power_on: true}
 
 # Unprovisioned device beacon (AD 0x2B). Offsets are into the AD value:
 # uuid_prefix = beacon type 00 + first 7 UUID bytes; then the reversed BLE address;

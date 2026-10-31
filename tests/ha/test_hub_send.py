@@ -450,4 +450,6 @@ async def test_queued_presses_fail_on_unload(hass, fake_board, hass_storage):
     results = await asyncio.gather(*presses, return_exceptions=True)
     assert await unload
     assert len(fake_board.sent) <= 1
-    assert all(isinstance(result, HomeAssistantError) for result in results[1:])
+    from custom_components.ble_mesh_lights.hub import HubClosed
+
+    assert all(isinstance(result, HubClosed) for result in results[1:])

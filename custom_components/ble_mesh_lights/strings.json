@@ -171,7 +171,7 @@
         },
         "power_cycle_timeout": {
           "title": "No light found",
-          "description": "No light was switched on within 2 minutes. Submit to try again: switch the light off at the wall, wait about 15 seconds, and switch it on."
+          "description": "No light was switched on within 2 minutes. Select Next to try again: switch the light off at the wall, wait about 15 seconds, and switch it on."
         },
         "blinked": {
           "title": "Did the light blink?",
@@ -188,9 +188,9 @@
             "test_failed": "No"
           }
         },
-        "test_failed": {
+        "test_failed_valen": {
           "title": "The light did not react",
-          "description": "Try the test again, start over from switching the light off and on, or reset the light: {reset_hint}",
+          "description": "Try the test again, start over from switching the light off and on, or reset the light: Switch the light off and on at the wall five times quickly.",
           "menu_options": {
             "test": "Try the test again",
             "power_cycle": "Start over",
@@ -205,9 +205,9 @@
             "done": "Done, no remote"
           }
         },
-        "remote_pair": {
+        "remote_pair_valen": {
           "title": "Remote",
-          "description": "If the remote is already paired with this light, just select Next.\n\nIf not, pair it:\n{remote_hint}\n\nThen select Next."
+          "description": "If the remote is already paired with this light, just select Next.\n\nIf not, pair it:\n1. Switch the light off and on at the wall.\n2. Right away, press and hold ON on the remote until the light blinks.\n3. Release ON and press any button on the remote, for example OFF, to end pairing. While the remote's LED is on, the light ignores every command.\n\nThen select Next."
         },
         "remote_not_heard": {
           "title": "No press heard",
@@ -235,33 +235,43 @@
         },
         "settings": {
           "title": "Lamp settings",
-          "description": "Before you delete a lamp, reset it ({reset_hint}) and pair its remote again: the integration never sends \"unpair all\".",
+          "description": "Before you delete a lamp, reset it and pair its remote again: the integration never sends \"unpair all\".",
           "data": {
             "name": "Name",
             "after_outage": "After a power outage"
           }
         },
-        "pair_again": {
+        "settings_valen": {
+          "title": "Lamp settings",
+          "description": "Before you delete a lamp, reset it (Switch the light off and on at the wall five times quickly.) and pair its remote again: the integration never sends \"unpair all\".",
+          "data": {
+            "name": "Name",
+            "after_outage": "After a power outage"
+          }
+        },
+        "pair_again_valen": {
           "title": "Pair again",
-          "description": "After a factory reset ({reset_hint}) the light has forgotten Home Assistant and its remote. Pair it again here: its address, entities and automations stay. Select Submit, then switch the light off and on as the next screen says."
+          "description": "Pairs the light with Home Assistant again, for example after a factory reset. Its address, entities and automations stay.\n\nReset: switch the light off and on at the wall five times quickly.\n\nSelect Next, then switch the light off and on as the next screen says. A reset light blinks; one that was not reset does not, because it still knows Home Assistant. Then Home Assistant switches it off and on to check."
         }
       },
       "progress": {
         "power_cycle": "Switch the light off at the wall, wait about 15 seconds, then switch it on. Home Assistant pairs with it as soon as it appears.",
         "test": "Home Assistant switches the light off and on again.",
         "remote_press": "Press any scene button on the remote.",
-        "again_test": "If the light was reset, it blinks now; if not, it does not, because it still knows Home Assistant. Both are fine. Home Assistant now switches the light off and on, to show that it obeys."
+        "again_test": "Home Assistant switches the light off and on again."
       },
       "abort": {
         "not_loaded": "BLE Mesh Lights is not running. Check the integration and try again.",
         "no_address_left": "No address is left above the base address.",
         "send_failed": "Sending failed: {error}",
-        "reset_needed": "Reset the light, then add it again: {reset_hint}",
         "reconfigure_successful": "Re-configuration was successful.",
         "lamp_added": "{name} is added.",
         "remote_bound": "Remote {address} is bound to {name}. Press a scene on the remote: the light's card shows it.",
         "paired_again": "{name} is paired again.",
-        "already_configured": "This light is already added."
+        "already_configured": "This light is already added.",
+        "reset_needed_valen": "Reset the light, then add it again: Switch the light off and on at the wall five times quickly.",
+        "reset_needed_again_valen": "Reset the light, then pair it again: Switch the light off and on at the wall five times quickly. Then open the light's Reconfigure → Pair again.",
+        "profile_failed": "The light's profile failed to load; see the repair."
       },
       "error": {}
     }
@@ -271,6 +281,12 @@
       "options": {
         "nothing": "Do nothing",
         "restore": "Restore previous state"
+      }
+    },
+    "remote_label": {
+      "options": {
+        "new": "New remote ({profile})",
+        "ignored": "ignored ({profile})"
       }
     }
   },
@@ -420,7 +436,7 @@
         },
         "queue": {
           "name": "Queue",
-          "description": "Wait for the commands sent to the light before this one, as a remote press does; the answer says whether the command went out."
+          "description": "Wait for the commands sent to the light before this one, as a remote press does. With queue a failed send does not raise: the answer's sent and reason tell (an unknown command still raises)."
         }
       }
     },

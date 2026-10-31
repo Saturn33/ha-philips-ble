@@ -126,6 +126,35 @@ async def test_send_command_queue_response(hass, fake_board, hass_storage):
         )
 
 
+async def test_send_command_queue_answers_reloaded(hass, fake_board, hass_storage):
+    """A press still waiting when the entry unloads answers reason "reloaded", it does not raise."""
+    import asyncio
+
+    entry, _, _ = await _setup(hass, [fake_board], hass_storage)
+    fake_board.hold = asyncio.Event()
+
+    def press():
+        return asyncio.ensure_future(
+            hass.services.async_call(
+                DOMAIN,
+                "send_command",
+                {ATTR_ENTITY_ID: LIGHT, "command": "on", "queue": True},
+                blocking=True,
+                return_response=True,
+            )
+        )
+
+    first, second = press(), press()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    unload = asyncio.ensure_future(hass.config_entries.async_unload(entry.entry_id))
+    await asyncio.sleep(0)
+    fake_board.hold.set()
+    await first
+    assert (await second)[LIGHT] == {"sent": False, "reason": "reloaded", "error": "BLE Mesh Lights reloaded"}
+    assert await unload
+
+
 async def test_send_command_queue_rejects_unknown(hass, fake_board, hass_storage):
     await _setup(hass, [fake_board], hass_storage)
     with pytest.raises(ServiceValidationError):

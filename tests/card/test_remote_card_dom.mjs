@@ -162,3 +162,67 @@ test("a card without lamps shows a picture of the remote instead of failing", ()
   assert.ok(card.shadowRoot.innerHTML.includes('class="placeholder"'));
   card.disconnectedCallback();
 });
+
+test("a key change during a fetch fetches again", async () => {
+  let release;
+  const asked = [];
+  const hass = {
+    language: "en",
+    states: { "light.a": lampState(128), "light.b": lampState(128) },
+    callWS: (message) => {
+      asked.push(message.entity_ids.join(","));
+      return asked.length === 1
+        ? new Promise((resolve) => { release = () => resolve({ loaded: true, lamps: { "light.a": INFO }, failed: {} }); })
+        : Promise.resolve({ loaded: true, lamps: { "light.a": INFO, "light.b": INFO }, failed: {} });
+    },
+  };
+  const card = makeCard();
+  card.hass = hass;
+  card.setConfig({ entities: ["light.a", "light.b"] }); // the lamps change while the first fetch runs
+  release();
+  await tick();
+  await tick();
+  assert.deepEqual(asked, ["light.a", "light.a,light.b"]);
+  assert.ok(card._info.lamps["light.b"]);
+  card.disconnectedCallback();
+});
+
+test("a press with every lamp unavailable says no power", async () => {
+  const messages = [];
+  const hass = {
+    language: "en",
+    states: { "light.a": { state: "unavailable", attributes: { friendly_name: "Street" } } },
+    callWS: async () => ({ loaded: true, lamps: { "light.a": INFO }, failed: {} }),
+  };
+  const card = makeCard();
+  card.dispatchEvent = (event) => messages.push(event);
+  card.hass = hass;
+  await tick();
+  await card._press("on");
+  const note = messages.find((event) => event.type === "hass-notification");
+  assert.equal(note.detail.message, "Not sent: Street (no power)");
+  card.disconnectedCallback();
+});
+
+test("an answer for the old lamps is not shown for the new ones", async () => {
+  let releaseFirst;
+  let releaseSecond;
+  const hass = {
+    language: "en",
+    states: { "light.a": lampState(128), "light.b": lampState(128) },
+    callWS: (message) =>
+      message.entity_ids.length === 1
+        ? new Promise((resolve) => { releaseFirst = () => resolve({ loaded: true, lamps: { "light.a": INFO }, failed: {} }); })
+        : new Promise((resolve) => { releaseSecond = () => resolve({ loaded: true, lamps: { "light.a": INFO, "light.b": INFO }, failed: {} }); }),
+  };
+  const card = makeCard();
+  card.hass = hass;
+  card.setConfig({ entities: ["light.a", "light.b"] });
+  releaseFirst(); // the answer for light.a alone arrives while the lamps already changed
+  await tick();
+  assert.equal(card._info, null); // not kept: light.b would read "Not a BLE Mesh lamp"
+  releaseSecond();
+  await tick();
+  assert.ok(card._info.lamps["light.b"]);
+  card.disconnectedCallback();
+});

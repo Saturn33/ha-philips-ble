@@ -8,10 +8,10 @@ other commands or levels needs a new profile, not new code.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -64,13 +64,6 @@ class PairingRules:
     requests: int
     interval: float
     after_power_on: bool
-    reset_hint: Mapping[str, str]  # language → text; "en" always present
-    remote_hint: Mapping[str, str]
-
-    def hint(self, kind: str, language: str) -> str:
-        """The "reset" or "remote" hint in this language, else in English."""
-        texts = self.reset_hint if kind == "reset" else self.remote_hint
-        return texts.get(language, texts["en"])
 
 
 @dataclass(frozen=True)
@@ -106,6 +99,7 @@ class Profile:
     pairing: PairingRules
     beacon: BeaconRules
     remote_layout: Mapping[str, Any] | None = None  # remote.json: how the remote card draws it
+    texts: str = ""  # the set of translated wizard step variants (see _texts)
 
 
     def identify(self, payload: bytes) -> str | None:
@@ -146,14 +140,17 @@ class _Reader:
         return value
 
 
-def _hint(reader: _Reader, pairing: Mapping[str, Any], key: str) -> Mapping[str, str]:
-    """A text for the wizard: one string (English), or one per language with "en" among them."""
-    value = reader.get(pairing, key, (str, Mapping), "pairing.")
-    if isinstance(value, str):
-        return MappingProxyType({"en": value})
-    if "en" not in value or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
-        raise reader.fail(f"pairing.{key}", 'expected texts by language, with "en"')
-    return MappingProxyType(dict(value))
+TEXT_SET = re.compile(r"[a-z0-9_]+")
+
+
+def _texts(reader: _Reader, data: Mapping[str, Any], profile_id: str) -> str:
+    """The profile's set of wizard texts (reset and remote pairing hints): translated step variants
+    `<step>_<texts>` in the integration's translations, so the frontend shows them in the user's
+    language; a flow does not know its user, so the server could only use its own language."""
+    texts = str(data.get("texts", profile_id))
+    if not TEXT_SET.fullmatch(texts):
+        raise reader.fail("texts", "only a-z, 0-9 and _ (it names translation keys)")
+    return texts
 
 
 def _template(reader: _Reader, name: str, template: str) -> str:
@@ -283,9 +280,10 @@ def load_profile(path: Path) -> Profile:
         requests=reader.get(pairing, "requests", int, "pairing."),
         interval=float(reader.get(pairing, "interval", (int, float), "pairing.")),
         after_power_on=reader.get(pairing, "after_power_on", bool, "pairing."),
-        reset_hint=_hint(reader, pairing, "reset_hint"),
-        remote_hint=_hint(reader, pairing, "remote_hint"),
     )
+    for old in ("reset_hint", "remote_hint"):
+        if old in pairing:
+            raise reader.fail(f"pairing.{old}", "replaced by texts: the hints live in the translations")
     if pairing_rules.requests <= 0 or pairing_rules.interval <= 0:
         raise reader.fail("pairing", "requests and interval must be positive")
     if pairing_rules.command not in commands:
@@ -330,6 +328,7 @@ def load_profile(path: Path) -> Profile:
             ),
         ),
         remote_layout=_remote_layout(path.parent / "remote.json", commands, pairing_rules.command),
+        texts=_texts(reader, data, reader.get(data, "id", str)),
     )
 
 
@@ -368,6 +367,8 @@ def _remote_layout(path: Path, commands: Mapping[str, Command], pairing: str) ->
         if kind == "row":
             for value in reader.get(group, "buttons", list, f"{where}."):
                 command(value, f"{where}.buttons")
+            if not isinstance(group.get("wrap", False), bool):
+                raise reader.fail(f"{where}.wrap", "true or false")
         elif kind == "ring":
             for part in ("up", "down", "center"):
                 command(reader.get(group, part, str, f"{where}."), f"{where}.{part}")

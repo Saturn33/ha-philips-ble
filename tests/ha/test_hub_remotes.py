@@ -231,7 +231,7 @@ async def test_bound_remote_survives_restart(hass, fake_board, hass_storage):
 
 
 async def test_wizard_remote_heard_before_the_lamp_exists_gets_no_issue(hass, fake_board, hass_storage):
-    """Pressed between pairing and "Finish": unknown for a moment, then bound by the new lamp."""
+    """Pressed while the wizard waited for it: unknown for a moment, then bound by the new lamp."""
     from homeassistant.config_entries import ConfigSubentry
 
     from .conftest import seed_counters
@@ -254,3 +254,35 @@ async def test_unignored_remote_is_reported_again(hass, fake_board, hass_storage
     hub.async_ignore_remote(R2, ignore=False)
     await _press(hass, fake_board, "off", 0x13B3, 110)
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"new_remote_{R2}") is not None
+
+
+async def test_closed_hub_saves_no_seed(hass, fake_board, hass_storage):
+    from custom_components.ble_mesh_lights.hub import HubClosed
+
+    entry, hub, _ = await _setup(hass, [fake_board], hass_storage)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    saved = dict(hass_storage[STORAGE_STATE])
+    with pytest.raises(HubClosed):
+        await hub.async_seed_lamp_state("E8:26:CF:00:00:02", LampState(True, 3000, 100))
+    assert hass_storage[STORAGE_STATE] == saved
+
+
+async def test_closed_hub_binds_nothing(hass, fake_board, hass_storage):
+    from custom_components.ble_mesh_lights.hub import HubClosed
+
+    entry, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    saved = dict(hass_storage[STORAGE_STATE])
+    with pytest.raises(HubClosed):
+        await hub.async_bind_remote(R1, [l1])
+    assert hass_storage[STORAGE_STATE] == saved
+
+
+async def test_wizard_bind_unignores(hass, fake_board, hass_storage):
+    """W2: binding a remote that was on the ignored list takes it off the list."""
+    _, hub, l1 = await _setup(hass, [fake_board], hass_storage)
+    await _press(hass, fake_board, "on", 0x37AF, 2280)
+    hub.ignored_remotes.add(R1)
+    await hub.async_add_remote_lamp(R1, l1)
+    assert R1 not in hub.ignored_remotes
+    assert hub.remotes[R1].lamps == [l1]
