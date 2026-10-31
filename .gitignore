@@ -26,3 +26,6 @@ tools/deploy.env
 
 # Agent workspaces
 .superpowers/
+
+# IDE settings
+.idea/
