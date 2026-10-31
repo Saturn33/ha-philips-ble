@@ -216,3 +216,17 @@ test("cardView reports a lamp whose profile failed", () => {
 test("fallbackRemote mini wraps", () => {
   assert.equal(M.fallbackRemote(["on", "off"]).groups.all.wrap, true);
 });
+
+test("the card speaks Spanish", () => {
+  const on = (id) => view(id, lamp("on"));
+  const off = (id) => view(id, lamp("off"));
+  const gone = (id) => view(id, lamp("unavailable"));
+  assert.equal(M.cardView([off("a")], { lang: "es" }).line, "Apagada");
+  assert.equal(M.cardView([gone("a")], { lang: "es" }).line, "Sin corriente");
+  assert.equal(M.cardView([on("a"), on("b"), off("c")], { lang: "es" }).line, "2 de 3 encendidas");
+  assert.equal(M.cardView([on("a"), off("b"), gone("c")], { lang: "es" }).line, "1 encendida · 1 apagada · 1 sin corriente");
+  assert.equal(M.cardView([on("a"), on("b")], { lang: "es" }).line, "Todas encendidas");
+  assert.deepEqual([1, 2, 5].map((n) => M.lampsTitle(n, "es")), ["1 lámpara", "2 lámparas", "5 lámparas"]);
+  assert.equal(M.ledMessage(["light.a"], {}, { names: { "light.a": "Calle" }, lang: "es" }), "No enviado: Calle (sin corriente)");
+  assert.equal(M.cardView([on("a")], { lang: "es-ES" }).uncertainHint.startsWith("Estado dudoso"), true);
+});

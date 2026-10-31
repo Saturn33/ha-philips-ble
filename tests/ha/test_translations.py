@@ -52,7 +52,7 @@ def test_ru_keeps_placeholders():
 def test_no_key_references():
     """HA resolves [%key:...] only when it builds core's translations: a custom integration
     would show the reference itself."""
-    for name in ("strings.json", "translations/en.json", "translations/ru.json"):
+    for name in ("strings.json", "translations/en.json", "translations/ru.json", "translations/es.json"):
         text = (PACKAGE / name).read_text(encoding="utf-8")
         assert "[%key:" not in text, name
 
@@ -95,7 +95,7 @@ def test_every_profile_text_set_is_translated():
     assert errors == []
     files = {
         name: json.loads((PACKAGE / name).read_text(encoding="utf-8"))
-        for name in ("strings.json", "translations/en.json", "translations/ru.json")
+        for name in ("strings.json", "translations/en.json", "translations/ru.json", "translations/es.json")
     }
     reference = files["strings.json"]["config_subentries"]["lamp"]
     for loaded in profiles.values():
@@ -137,3 +137,36 @@ def test_pair_again_explains_the_blink_before_it_happens():
         description = lamp["step"]["pair_again_valen"]["description"]
         assert "(" not in description, name
         assert "\n\nReset: " in description or "\n\nСброс: " in description, name
+
+
+# Values that stay the same in Spanish (names, units, the remote's printed labels).
+SAME_IN_SPANISH = {"BLE Mesh Lights", "Relax", "{name}", "No"}
+
+
+def test_es_has_every_key():
+    strings, es = _load(PACKAGE / "strings.json"), _load(PACKAGE / "translations/es.json")
+    assert sorted(set(strings) - set(es)) == []
+    assert sorted(set(es) - set(strings)) == []
+
+
+def test_es_is_translated():
+    strings, es = _load(PACKAGE / "strings.json"), _load(PACKAGE / "translations/es.json")
+    same = [path for path, value in strings.items() if es.get(path) == value and value not in SAME_IN_SPANISH]
+    assert same == []
+
+
+def test_es_keeps_placeholders():
+    strings, es = _load(PACKAGE / "strings.json"), _load(PACKAGE / "translations/es.json")
+    for path, value in strings.items():
+        assert set(re.findall(r"\{\w+\}", value)) == set(re.findall(r"\{\w+\}", es[path])), path
+
+
+def test_es_steps_have_no_english_hints():
+    es = json.loads((PACKAGE / "translations/es.json").read_text(encoding="utf-8"))["config_subentries"][
+        "lamp"
+    ]
+    for path, text in _flat(es).items():
+        if "_valen" in path:
+            assert (
+                "Switch the light" not in text and "press and hold" not in text and "Reconfigure" not in text
+            ), path

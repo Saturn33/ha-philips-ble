@@ -1,0 +1,454 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BLE Mesh Lights",
+        "description": "Elige las placas ESPHome con el paquete ble-adv-tx que envían a tus luces y las escuchan.",
+        "data": {
+          "boards": "Placas proxy",
+          "base_address": "Dirección base",
+          "command_interval": "Intervalo mínimo entre órdenes",
+          "outage_sensor": "Sensor de corte de corriente",
+          "power_cycle_gap": "Detección de cortes cortos"
+        },
+        "data_description": {
+          "boards": "Placas ESPHome con el paquete ble-adv-tx.",
+          "base_address": "Las luces reciben las direcciones siguientes a esta (0x7E01, 0x7E02, …). Deja el valor por defecto salvo que choque con otros dispositivos Bluetooth Mesh. No se puede cambiar una vez añadida una luz.",
+          "command_interval": "Tiempo mínimo entre dos órdenes a la misma luz.",
+          "outage_sensor": "Opcional. Un sensor binario que se enciende cuando vuelve la corriente tras un corte y después se apaga de nuevo (no sirve un sensor que se queda encendido). Las luces configuradas con «Restaurar el estado anterior» vuelven entonces a su último estado. Límites conocidos: consulta «Known issues» en la documentación de la integración.",
+          "power_cycle_gap": "Tras apagarla con el interruptor, una luz sigue emitiendo unos 7 s; durante los primeros 30 minutos después de recibir corriente envía varios mensajes por segundo. Un silencio de estos segundos después de eso se considera un posible apagado corto y el estado de la luz se marca como dudoso. Más corto: detecta ciclos más rápidos, pero con señal débil da más falsas alarmas. Los ciclos de menos de unos 7 s no se pueden detectar."
+        }
+      }
+    },
+    "error": {
+      "no_boards": "Elige al menos una placa ESPHome con el paquete ble-adv-tx (debe existir su acción adv_svc_v1).",
+      "invalid_base_address": "Introduce una dirección hexadecimal de 0x0001 a 0x7F00."
+    },
+    "abort": {
+      "single_instance_allowed": "Ya está configurada. Solo se permite una configuración."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "settings": "Ajustes",
+          "remotes": "Mandos"
+        }
+      },
+      "settings": {
+        "title": "Ajustes",
+        "description": "Dirección base: {base_address}. No se puede cambiar una vez añadida una luz, porque las luces están emparejadas con direcciones derivadas de ella.",
+        "data": {
+          "boards": "Placas proxy",
+          "base_address": "Dirección base",
+          "command_interval": "Intervalo mínimo entre órdenes",
+          "outage_sensor": "Sensor de corte de corriente",
+          "power_cycle_gap": "Detección de cortes cortos"
+        },
+        "data_description": {
+          "boards": "Placas ESPHome con el paquete ble-adv-tx.",
+          "base_address": "Las luces reciben las direcciones siguientes a esta (0x7E01, 0x7E02, …). Deja el valor por defecto salvo que choque con otros dispositivos Bluetooth Mesh. No se puede cambiar una vez añadida una luz.",
+          "command_interval": "Tiempo mínimo entre dos órdenes a la misma luz.",
+          "outage_sensor": "Opcional. Un sensor binario que se enciende cuando vuelve la corriente tras un corte y después se apaga de nuevo (no sirve un sensor que se queda encendido). Las luces configuradas con «Restaurar el estado anterior» vuelven entonces a su último estado. Límites conocidos: consulta «Known issues» en la documentación de la integración.",
+          "power_cycle_gap": "Tras apagarla con el interruptor, una luz sigue emitiendo unos 7 s; durante los primeros 30 minutos después de recibir corriente envía varios mensajes por segundo. Un silencio de estos segundos después de eso se considera un posible apagado corto y el estado de la luz se marca como dudoso. Más corto: detecta ciclos más rápidos, pero con señal débil da más falsas alarmas. Los ciclos de menos de unos 7 s no se pueden detectar."
+        }
+      },
+      "remotes": {
+        "title": "Mandos",
+        "description": "Mandos conocidos, mandos nuevos oídos en los últimos 30 minutos y mandos ignorados.",
+        "data": {
+          "remote": "Mando"
+        }
+      },
+      "remote_action": {
+        "title": "Mando {address}",
+        "menu_options": {
+          "remote_lamps": "Elegir sus luces",
+          "remote_remove": "Olvidar este mando",
+          "remote_ignore": "Ignorar este mando",
+          "remote_unignore": "Dejar de ignorar este mando"
+        }
+      },
+      "remote_lamps": {
+        "title": "Luces de este mando",
+        "description": "Home Assistant sigue las pulsaciones de este mando en las luces elegidas. Empareja el mando con las propias luces como indica su manual.",
+        "data": {
+          "lamps": "Luces"
+        }
+      }
+    },
+    "error": {
+      "no_boards": "Elige al menos una placa ESPHome con el paquete ble-adv-tx (debe existir su acción adv_svc_v1).",
+      "invalid_base_address": "Introduce una dirección hexadecimal de 0x0001 a 0x7F00."
+    },
+    "abort": {
+      "remotes_updated": "Mandos actualizados.",
+      "no_remotes": "Todavía no se ha oído ningún mando. Pulsa un botón de un mando cerca de una placa proxy.",
+      "not_loaded": "BLE Mesh Lights no está en marcha. Revisa la integración y vuelve a intentarlo."
+    }
+  },
+  "issues": {
+    "sequence_store_missing": {
+      "title": "BLE Mesh Lights: contadores de mensajes perdidos",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Contadores de mensajes perdidos",
+            "description": "Falta el archivo con los contadores de mensajes o está dañado, y hay luces emparejadas. Empezar de nuevo desde cero haría que todas las luces ignoraran a Home Assistant. Envía para continuar con contadores muy por encima de cualquier valor anterior."
+          }
+        },
+        "abort": {
+          "not_loaded": "BLE Mesh Lights no está en marcha. Revisa la integración y vuelve a intentarlo."
+        }
+      }
+    },
+    "address_collision": {
+      "title": "BLE Mesh Lights: otra fuente usa la dirección {address}",
+      "description": "Un mensaje de {address}, una de las direcciones con las que envía Home Assistant, no lo ha enviado Home Assistant. Un mando u otro sistema usa la misma dirección, y las luces pueden ignorar a uno de ellos. Restablece de fábrica la luz afectada y vuelve a añadirla, o cambia la dirección del otro emisor."
+    },
+    "new_remote": {
+      "title": "Mando nuevo ({profile})",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Mando nuevo ({profile})",
+            "description": "Se ha oído por primera vez un mando con la dirección {address}. Vincúlalo a las luces que controla o ignóralo (por ejemplo, el mando de un vecino).",
+            "menu_options": {
+              "bind": "Vincular a luces",
+              "ignore": "Ignorar este mando"
+            }
+          },
+          "bind": {
+            "title": "Vincular a luces",
+            "data": {
+              "lamps": "Luces"
+            },
+            "description": "Home Assistant sigue las pulsaciones de este mando en las luces elegidas."
+          }
+        },
+        "abort": {
+          "not_loaded": "BLE Mesh Lights no está en marcha. Revisa la integración y vuelve a intentarlo."
+        }
+      }
+    },
+    "profile_errors": {
+      "title": "BLE Mesh Lights: perfiles de dispositivo no cargados",
+      "description": "No se han podido cargar estos perfiles de dispositivo, y las luces que los usan quedan no disponibles:\n\n{errors}"
+    },
+    "board_outdated": {
+      "title": "{board}: paquete de firmware antiguo",
+      "description": "La placa {board} informa de la versión {version} del paquete ble-adv-tx; BLE Mesh Lights necesita la versión {required} o posterior. Sigue enviando con la versión antigua, pero desde la versión 2 la placa envía un evento de latido cada 10 s, así que una placa desenchufada se detecta en unos 35 s en lugar de hasta un minuto (las órdenes enviadas mientras tanto se pierden). Actualiza el firmware ESPHome de la placa (consulta la guía de la placa)."
+    },
+    "board_not_ready": {
+      "title": "{board} no está lista",
+      "description": "La placa {board} no está conectada, su acción {action} no existe o (paquete 2) no llega su evento de latido esphome.ble_adv_tx.heartbeat. Comprueba que la placa está en línea y ejecuta el paquete ble-adv-tx."
+    },
+    "board_sensor_disabled": {
+      "title": "{board}: sensor BLE TX package desactivado",
+      "description": "El sensor de diagnóstico «BLE TX package» de la placa {board} está desactivado. BLE Mesh Lights lee de él la versión del firmware de la placa, así que no puede enviar a través de esta placa. Activa el sensor en la página del dispositivo de la placa y luego recarga BLE Mesh Lights (su menú → Recargar)."
+    }
+  },
+  "config_subentries": {
+    "lamp": {
+      "entry_type": "Luz",
+      "initiate_flow": {
+        "user": "Añadir luz"
+      },
+      "step": {
+        "user": {
+          "title": "Añadir una luz",
+          "description": "Elige el tipo de luz y cómo se llamará.",
+          "data": {
+            "profile": "Tipo de dispositivo",
+            "name": "Nombre",
+            "area": "Área",
+            "aliases": "Alias"
+          },
+          "data_description": {
+            "aliases": "Otros nombres para Assist, por ejemplo «luz de la calle»."
+          }
+        },
+        "power_cycle_timeout": {
+          "title": "No se ha encontrado ninguna luz",
+          "description": "No se ha encendido ninguna luz en 2 minutos. Pulsa Siguiente para volver a intentarlo: apaga la luz con el interruptor, espera unos 15 segundos y enciéndela."
+        },
+        "blinked": {
+          "title": "¿Ha parpadeado la luz?",
+          "description": "Home Assistant acaba de emparejarse con {name}.",
+          "menu_options": {
+            "test": "Sí, ha parpadeado",
+            "power_cycle": "No, volver a intentarlo"
+          }
+        },
+        "test_result": {
+          "title": "¿Se ha apagado y encendido la luz?",
+          "menu_options": {
+            "save": "Sí",
+            "test_failed": "No"
+          }
+        },
+        "test_failed_valen": {
+          "title": "La luz no ha reaccionado",
+          "description": "Repite la prueba, empieza de nuevo apagando y encendiendo la luz, o restablécela: apaga y enciende la luz con el interruptor cinco veces seguidas, rápido.",
+          "menu_options": {
+            "test": "Repetir la prueba",
+            "power_cycle": "Empezar de nuevo",
+            "reset_abort": "Restablecer la luz y salir"
+          }
+        },
+        "remote": {
+          "title": "Mando",
+          "description": "{name} está lista. ¿Vincular su mando para que Home Assistant siga sus pulsaciones?",
+          "menu_options": {
+            "remote_pair": "Vincular un mando",
+            "done": "Listo, sin mando"
+          }
+        },
+        "remote_pair_valen": {
+          "title": "Mando",
+          "description": "Si el mando ya está emparejado con esta luz, pulsa Siguiente.\n\nSi no, emparéjalo:\n1. Apaga y enciende la luz con el interruptor.\n2. Enseguida, mantén pulsado ON en el mando hasta que la luz parpadee.\n3. Suelta ON y pulsa cualquier botón del mando, por ejemplo OFF, para terminar el emparejamiento. Mientras el LED del mando está encendido, la luz ignora todas las órdenes.\n\nDespués pulsa Siguiente."
+        },
+        "remote_not_heard": {
+          "title": "No se ha oído ninguna pulsación",
+          "description": "Home Assistant no ha oído ningún botón de un mando en un minuto. A veces una pulsación suelta se pierde en el aire.",
+          "menu_options": {
+            "remote_pair": "Volver a intentarlo",
+            "done": "Listo, sin mando"
+          }
+        },
+        "remote_heard": {
+          "title": "Mando {address}",
+          "description": "Se ha oído el mando {address}, botón «{button}». Ahora controla: {lamps}.",
+          "menu_options": {
+            "remote_bind": "Vincularlo a esta luz",
+            "remote_press": "No es este mando, otra vez",
+            "done": "Listo, sin mando"
+          }
+        },
+        "reconfigure": {
+          "title": "Luz {name}",
+          "menu_options": {
+            "settings": "Ajustes",
+            "pair_again": "Emparejar de nuevo"
+          }
+        },
+        "settings": {
+          "title": "Ajustes de la luz",
+          "description": "Antes de eliminar una luz, restablécela y vuelve a emparejar su mando: la integración nunca envía «desvincular todo».",
+          "data": {
+            "name": "Nombre",
+            "after_outage": "Tras un corte de corriente"
+          }
+        },
+        "settings_valen": {
+          "title": "Ajustes de la luz",
+          "description": "Antes de eliminar una luz, restablécela (apaga y enciende la luz con el interruptor cinco veces seguidas, rápido) y vuelve a emparejar su mando: la integración nunca envía «desvincular todo».",
+          "data": {
+            "name": "Nombre",
+            "after_outage": "Tras un corte de corriente"
+          }
+        },
+        "pair_again_valen": {
+          "title": "Emparejar de nuevo",
+          "description": "Vuelve a emparejar la luz con Home Assistant, por ejemplo tras restablecerla de fábrica. Su dirección, entidades y automatizaciones se mantienen.\n\nRestablecer: apaga y enciende la luz con el interruptor cinco veces seguidas, rápido.\n\nPulsa Siguiente y luego apaga y enciende la luz como indique la siguiente pantalla. Una luz restablecida parpadea; una que no se ha restablecido no, porque ya conoce a Home Assistant. Después Home Assistant la apaga y la enciende para comprobarlo."
+        }
+      },
+      "progress": {
+        "power_cycle": "Apaga la luz con el interruptor, espera unos 15 segundos y enciéndela. Home Assistant se empareja con ella en cuanto aparece.",
+        "test": "Home Assistant apaga y vuelve a encender la luz.",
+        "remote_press": "Pulsa cualquier botón de escena del mando.",
+        "again_test": "Home Assistant apaga y vuelve a encender la luz."
+      },
+      "abort": {
+        "not_loaded": "BLE Mesh Lights no está en marcha. Revisa la integración y vuelve a intentarlo.",
+        "no_address_left": "No queda ninguna dirección por encima de la dirección base.",
+        "send_failed": "Error al enviar: {error}",
+        "reconfigure_successful": "La reconfiguración se ha realizado correctamente.",
+        "lamp_added": "Se ha añadido {name}.",
+        "remote_bound": "El mando {address} está vinculado a {name}. Pulsa una escena en el mando: la tarjeta de la luz la mostrará.",
+        "paired_again": "{name} está emparejada de nuevo.",
+        "already_configured": "Esta luz ya está añadida.",
+        "reset_needed_valen": "Restablece la luz y vuelve a añadirla: apaga y enciende la luz con el interruptor cinco veces seguidas, rápido.",
+        "reset_needed_again_valen": "Restablece la luz y vuelve a emparejarla: apaga y enciende la luz con el interruptor cinco veces seguidas, rápido. Después abre los ajustes de la luz (⋮ junto a la luz en la integración) y elige «Emparejar de nuevo».",
+        "profile_failed": "No se ha podido cargar el perfil de la luz; consulta la reparación."
+      },
+      "error": {}
+    }
+  },
+  "selector": {
+    "after_outage": {
+      "options": {
+        "nothing": "No hacer nada",
+        "restore": "Restaurar el estado anterior"
+      }
+    },
+    "remote_label": {
+      "options": {
+        "new": "Mando nuevo ({profile})",
+        "ignored": "ignorado ({profile})"
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "lamp": {
+        "state_attributes": {
+          "effect": {
+            "state": {
+              "relax": "Relax",
+              "bright": "Brillante",
+              "concentrate": "Concentración",
+              "energise": "Energía",
+              "nightlight": "Luz nocturna"
+            }
+          },
+          "state_uncertain": {
+            "name": "Estado dudoso"
+          },
+          "published_at": {
+            "name": "Estado publicado"
+          }
+        }
+      }
+    },
+    "binary_sensor": {
+      "power": {
+        "name": "Alimentación"
+      },
+      "state_uncertain": {
+        "name": "Estado dudoso"
+      }
+    },
+    "button": {
+      "brightness_up": {
+        "name": "Más brillo"
+      },
+      "brightness_down": {
+        "name": "Menos brillo"
+      },
+      "next_color_temperature": {
+        "name": "Siguiente temperatura de color"
+      }
+    },
+    "sensor": {
+      "scene": {
+        "name": "Escena",
+        "state": {
+          "none": "Ninguna",
+          "relax": "Relax",
+          "bright": "Brillante",
+          "concentrate": "Concentración",
+          "energise": "Energía",
+          "nightlight": "Luz nocturna"
+        }
+      },
+      "brightness": {
+        "name": "Brillo"
+      },
+      "color_temperature": {
+        "name": "Temperatura de color"
+      },
+      "signal_strength": {
+        "name": "Intensidad de señal"
+      },
+      "last_beacon": {
+        "name": "Última baliza"
+      },
+      "transmitting_proxy": {
+        "name": "Placa emisora"
+      },
+      "last_press": {
+        "name": "Última pulsación"
+      },
+      "missed_presses": {
+        "name": "Pulsaciones perdidas"
+      },
+      "paired_lamp": {
+        "name": "Luz emparejada"
+      }
+    },
+    "event": {
+      "button_press": {
+        "name": "Pulsación de botón",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "on": "Encender",
+              "off": "Apagar",
+              "brightness_up": "Más brillo",
+              "brightness_down": "Menos brillo",
+              "color_temperature": "Temperatura de color",
+              "relax": "Relax",
+              "bright": "Brillante",
+              "concentrate": "Concentración",
+              "energise": "Energía",
+              "nightlight": "Luz nocturna",
+              "pairing": "Emparejamiento"
+            }
+          }
+        }
+      }
+    }
+  },
+  "device": {
+    "remote": {
+      "name": "Mando {name} ({lamps})"
+    }
+  },
+  "exceptions": {
+    "unknown_command": {
+      "message": "Orden desconocida «{command}». Órdenes: {commands}."
+    },
+    "unknown_effect": {
+      "message": "Efecto desconocido «{effect}». Efectos: {effects}."
+    },
+    "press_queue_full": {
+      "message": "Hay demasiadas pulsaciones esperando para esta luz; vuelve a intentarlo en un momento."
+    }
+  },
+  "services": {
+    "set_assumed_state": {
+      "name": "Fijar estado supuesto",
+      "description": "Indica a Home Assistant cómo está la luz ahora, sin enviar nada (por ejemplo, después de cambiarla a mano).",
+      "fields": {
+        "on": {
+          "name": "Encendida",
+          "description": "Si la luz está encendida."
+        },
+        "color_temp_kelvin": {
+          "name": "Temperatura de color",
+          "description": "Temperatura de color en kelvin; se usa la más cercana que tenga la luz."
+        },
+        "brightness": {
+          "name": "Brillo",
+          "description": "Brillo de 0 a 255; se usa el escalón más cercano que tenga la luz."
+        }
+      }
+    },
+    "send_command": {
+      "name": "Enviar orden",
+      "description": "Envía una orden con nombre del perfil de la luz.",
+      "fields": {
+        "command": {
+          "name": "Orden",
+          "description": "Un identificador de orden del perfil, por ejemplo relax o brightness_up."
+        },
+        "queue": {
+          "name": "Cola",
+          "description": "Esperar a las órdenes enviadas a la luz antes que esta, como hace una pulsación del mando. Con cola, un envío fallido no da error: lo indican los campos sent y reason de la respuesta (una orden desconocida sigue dando error)."
+        }
+      }
+    },
+    "skip_sequence": {
+      "name": "Avanzar el contador",
+      "description": "Hace avanzar el contador de mensajes de la luz, por ejemplo tras restaurar una copia de seguridad antigua, para que la luz no ignore a Home Assistant.",
+      "fields": {
+        "amount": {
+          "name": "Cantidad",
+          "description": "Cuánto avanzar el contador."
+        }
+      }
+    }
+  }
+}
