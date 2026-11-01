@@ -33,7 +33,7 @@ body:
     attributes:
       label: Integration version
       description: Settings → Devices & services → BLE Mesh Lights, or the Marketplace / HACS page.
-      placeholder: 0.5.0
+      placeholder: 0.5.1
     validations:
       required: true
   - type: input

@@ -1,7 +1,7 @@
 # Example node: a Seeed XIAO ESP32-C3 as a Bluetooth proxy that can also send
 # commands to Bluetooth Mesh lights.
 #
-# Keep the two "v0.5.0" references below equal: the package and the component
+# Keep the two "v0.5.1" references below equal: the package and the component
 # must come from the same release.
 #
 # Copy secrets.yaml.example to secrets.yaml and fill in api_key, wifi_ssid,
@@ -47,13 +47,13 @@ bluetooth_proxy:
   active: true
 
 packages:
-  ble_adv_tx: github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@v0.5.0
+  ble_adv_tx: github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@v0.5.1
 
 external_components:
   - source:
       type: git
       url: https://github.com/Saturn33/ha-philips-ble
-      ref: v0.5.0
+      ref: v0.5.1
       path: esphome/components
     components: [ble_adv_proxy]
 

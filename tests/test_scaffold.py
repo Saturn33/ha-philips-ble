@@ -27,7 +27,7 @@ def test_manifest_and_hacs():
 
 def test_manifest_for_the_marketplace():
     manifest = json.loads((ROOT / "custom_components/ble_mesh_lights/manifest.json").read_text())
-    assert manifest["version"] == "0.5.0"
+    assert manifest["version"] == "0.5.1"
     assert manifest["documentation"] == "https://github.com/Saturn33/ha-philips-ble"
     assert manifest["issue_tracker"] == "https://github.com/Saturn33/ha-philips-ble/issues"
     assert manifest["categories"] == ["lighting.bulbs_lamps", "buttons_remotes"]

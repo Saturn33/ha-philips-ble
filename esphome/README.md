@@ -31,7 +31,7 @@ Everything else keeps working as on any Bluetooth proxy: BTHome sensors, Xiaomi 
 
 The node is the board's own ESPHome file. There are two starting points in this folder; both give the same board:
 
-- [`example-node.yaml`](example-node.yaml) takes the package and the component from the GitHub release `v0.5.0`. This is the usual start: nothing else needs downloading.
+- [`example-node.yaml`](example-node.yaml) takes the package and the component from the GitHub release `v0.5.1`. This is the usual start: nothing else needs downloading.
 - [`local-node.yaml`](local-node.yaml) takes them from this folder of a downloaded copy of the repository. Use it when you change the package yourself or build without access to GitHub.
 
 1. Copy one of them **in this folder** under the board's name, one file per board:
@@ -42,7 +42,7 @@ The node is the board's own ESPHome file. There are two starting points in this 
    ```
    `local-node.yaml` refers to `ble-adv-tx.yaml` and `components/` next to it, so its copy must stay in this folder. Files named `ble-proxy-tx-*.yaml` here are ignored by git.
 2. Rename the node inside the copy: `name: ble-proxy-tx-<place>` and `friendly_name: BLE Proxy TX (<Place>)`, for example `ble-proxy-tx-kitchen`. One name per board.
-3. With `example-node.yaml`: keep the two release references (`@v0.5.0` in `packages:` and `ref: v0.5.0` in `external_components:`) equal: the package and the component must come from the same release. To update the board to a later release, change both.
+3. With `example-node.yaml`: keep the two release references (`@v0.5.1` in `packages:` and `ref: v0.5.1` in `external_components:`) equal: the package and the component must come from the same release. To update the board to a later release, change both.
 4. Keep `bluetooth_proxy: active: true` if Home Assistant should also connect to other Bluetooth devices through this board; set `false` if the board only serves lights.
 
 ## Secrets
