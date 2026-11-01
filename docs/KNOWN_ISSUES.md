@@ -12,7 +12,7 @@ A command template must have the transaction byte `TT` as its 4th byte, and the 
 
 ## "Does this command turn the light on" is not a profile field
 
-A command that sets both colour temperature and brightness (a scene) is assumed to turn the light on, and power commands are `on`, `off` or `toggle`. The spec mentions a per-command "turns the light on" flag; the profile has none.
+A command that sets both colour temperature and brightness (a scene) is assumed to turn the light on, and power commands are `on`, `off` or `toggle`. The first design had a per-command "turns the light on" flag; the profile has none.
 
 **Why it stays:** every Valen scene turns the light on (checked from off), and no other kind of command needs the flag.
 

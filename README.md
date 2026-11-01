@@ -120,4 +120,4 @@ Diagnostics for an issue: Settings → Devices & services → BLE Mesh Lights �
 
 Philips is a trademark of its owner; this project is not affiliated with or endorsed by it.
 
-Licensed under the [MIT licence](LICENSE).
+Licensed under the [MIT licence](LICENSE). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).

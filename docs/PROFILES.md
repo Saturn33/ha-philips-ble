@@ -166,6 +166,8 @@ Valen's own icons: `valen:brighter`, `valen:dimmer`, `valen:relax`, `valen:conce
 2. **A fixture for behaviour that differs:** profiles used only by tests live in [`tests/fixtures/profiles`](../tests/fixtures/profiles/) (for example `toggle`, a light with one power toggle). Add one when your light needs code paths the Valen does not use, and a test for them.
 3. **A live check** with the real light, through the wizard: pairing (blink), the test, every remote button (Developer tools → Events or the remote's device page), every command from Home Assistant, the scenes from both directions, a switch-off at the wall (the light shows "No power" within `active_timeout` / `quiet_timeout`), and a factory reset followed by **Pair again**.
 
+The development setup and the test commands are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
 
 ## Contributing a profile
 

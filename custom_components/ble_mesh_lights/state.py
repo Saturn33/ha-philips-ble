@@ -93,7 +93,7 @@ def forget(state: LampState, *, level: bool = False, color_temp: bool = False) -
 
 
 def apply_press(profile: Profile, state: LampState, command: str, missed: int) -> tuple[LampState, bool]:
-    """A caught remote press after `missed` uncaught ones (spec §7)."""
+    """A caught remote press after `missed` uncaught ones (remote presses: docs/ARCHITECTURE.md)."""
     if missed > 0:
         effect = profile.commands[command].effect
         sets_temperature = effect is not None and effect.color_temp is not None

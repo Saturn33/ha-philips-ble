@@ -76,6 +76,69 @@ def test_profile_guide_covers_every_field():
         keys |= set(command) | set(command.get("effect", {}))
     for key in sorted(keys):
         assert f"`{key}`" in guide, key
-    for needle in ("tools/README.md", "docs/PROTOCOL.md", "remote.json", "tests/fixtures/profiles", "new_light"):
+    for needle in (
+        "tools/README.md",
+        "docs/PROTOCOL.md",
+        "remote.json",
+        "tests/fixtures/profiles",
+        "new_light",
+    ):
         assert needle in guide, needle
     assert "comes with the publishing version" not in guide
+
+
+def test_no_references_to_private_documents():
+    hits = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(ROOT),
+            "grep",
+            "-nE",
+            r"docs/(superpowers|checks)|spec §|The spec ",
+            "--",
+            ":!.gitignore",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert [hit for hit in hits if not hit.startswith("tests/test_docs.py:")] == []
+
+
+def test_architecture_records_the_pitfalls():
+    architecture = _read("docs/ARCHITECTURE.md")
+    for needle in ("heartbeat", "7 s", "six senders", "queue", "language", "colour temperature", "outage"):
+        assert needle in architecture, needle
+    for room in ("Street", "Patio", "Hall", "Terrace", "Kitchen", "Corridor", "Salon"):
+        assert not re.search(rf"\b{room}\b", architecture, re.IGNORECASE), room
+
+
+def test_contributing_has_setup_and_rules():
+    contributing = _read("CONTRIBUTING.md")
+    needles = (
+        "requirements-test.txt",
+        "requirements-test-ha.txt",
+        'pytest tests/ha -q -o addopts=""',
+        "node --test tests/card/*.mjs",
+        "ruff check .",
+        "tools/deploy_dev.sh",
+        "personal data",
+        "Saturn33/ha-philips-ble",
+        "topics",
+        "private",
+    )
+    for needle in needles:
+        assert needle in contributing, needle
+
+
+def test_agents_points_to_the_documents():
+    agents = _read("AGENTS.md")
+    for needle in (
+        "docs/ARCHITECTURE.md",
+        "CONTRIBUTING.md",
+        "ruff check .",
+        "pytest -q",
+        'pytest tests/ha -q -o addopts=""',
+        "node --test tests/card/*.mjs",
+    ):
+        assert needle in agents, needle
