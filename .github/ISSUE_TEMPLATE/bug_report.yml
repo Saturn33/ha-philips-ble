@@ -1,0 +1,63 @@
+name: Bug report
+description: Something does not work as described in the README.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Before you paste anything, remove private data: your **Wi-Fi password**, the board's **API key**, IP addresses you do not want to share and your home address. MAC addresses of your own lights and remotes are fine; the diagnostics download contains them.
+
+        Known limits (no feedback from the light, missed remote presses, …) are listed in [docs/KNOWN_ISSUES.md](https://github.com/Saturn33/ha-philips-ble/blob/main/docs/KNOWN_ISSUES.md).
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you did and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Settings → Devices & services → BLE Mesh Lights, or the Marketplace / HACS page.
+      placeholder: 0.5.0
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      description: Settings → About.
+      placeholder: 2026.11.0
+    validations:
+      required: true
+  - type: input
+    id: package_version
+    attributes:
+      label: Board package version
+      description: The board's diagnostic sensor "BLE TX package", and the board model.
+      placeholder: 2, Seeed XIAO ESP32-C3
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Settings → Devices & services → BLE Mesh Lights → ⋮ → Download diagnostics. Attach the file or paste its content.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant lines from Settings → System → Logs (search for ble_mesh_lights).
+      render: text

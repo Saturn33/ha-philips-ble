@@ -1,0 +1,45 @@
+name: New light or profile request
+description: Your lights are not Philips Valen, or they behave differently.
+labels: [profile]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A profile describes how one kind of light is controlled. [docs/PROFILES.md](https://github.com/Saturn33/ha-philips-ble/blob/main/docs/PROFILES.md) explains how to research a light and write a profile yourself; this form is for when you would rather send the data.
+
+        Before you paste anything, remove private data: your **Wi-Fi password**, the board's **API key** and your home address. Captures record every Bluetooth device nearby: **remove your neighbours' devices** and keep only your light and remote.
+  - type: input
+    id: model
+    attributes:
+      label: Light model
+      description: Brand, series and model number (from the box or the label), and where you bought it.
+    validations:
+      required: true
+  - type: textarea
+    id: what_works
+    attributes:
+      label: What works with the Valen profile
+      description: Does the light blink when the wizard pairs it? Does the test pass? Which remote buttons show up as events? What does not work?
+    validations:
+      required: true
+  - type: textarea
+    id: remote
+    attributes:
+      label: The remote
+      description: Its buttons (a photo helps), and how it is paired with the light according to the manual.
+  - type: textarea
+    id: captures
+    attributes:
+      label: Captures of each button
+      description: |
+        With `tools/capture.py` (see tools/README.md): one marker per button, each button pressed twice. Attach the .jsonl file with neighbours' devices removed, or paste the analyze.py report.
+  - type: textarea
+    id: beacons
+    attributes:
+      label: Beacon samples
+      description: A few adverts the light sends on its own while it is on (capture 2 minutes without pressing anything), and what changes when it is switched off at the wall.
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: How the light behaves
+      description: Colour temperatures and brightness steps, scenes, what it does after a power cut, how a factory reset works.

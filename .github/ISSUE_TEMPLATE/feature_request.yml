@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea for the integration, the board package or the remote card.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste private data: your **Wi-Fi password**, the board's **API key** or your home address.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what stops you.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How it could work.

@@ -51,3 +51,60 @@ def test_tests_workflow_covers_every_suite():
 def test_workflows_can_be_run_by_hand():
     for path in WORKFLOWS.glob("*.yml"):
         assert "workflow_dispatch" in _triggers(_workflow(path.name)), path.name
+
+
+TEMPLATES = ROOT / ".github" / "ISSUE_TEMPLATE"
+FORMS = ("bug_report.yml", "new_light.yml", "feature_request.yml")
+ITEM_TYPES = {"markdown", "input", "textarea", "dropdown", "checkboxes"}
+
+
+def _form(name: str) -> dict:
+    return yaml.safe_load((TEMPLATES / name).read_text(encoding="utf-8"))
+
+
+def _ids(form: dict) -> list[str]:
+    return [item["id"] for item in form["body"] if "id" in item]
+
+
+def test_issue_forms_are_valid():
+    for name in FORMS:
+        form = _form(name)
+        assert form["name"] and form["description"] and form["body"], name
+        ids = _ids(form)
+        assert len(ids) == len(set(ids)), name
+        assert {item["type"] for item in form["body"]} <= ITEM_TYPES, name
+
+
+def test_bug_report_asks_for_versions_and_diagnostics():
+    ids = _ids(_form("bug_report.yml"))
+    for wanted in ("integration_version", "ha_version", "package_version", "diagnostics"):
+        assert wanted in ids, wanted
+
+
+def test_new_light_asks_what_a_profile_needs():
+    form = _form("new_light.yml")
+    ids = _ids(form)
+    for wanted in ("model", "what_works", "captures", "beacons"):
+        assert wanted in ids, wanted
+    text = (TEMPLATES / "new_light.yml").read_text(encoding="utf-8")
+    assert "docs/PROFILES.md" in text
+    assert "neighbours' devices" in text
+
+
+def test_private_data_warning():
+    for name in FORMS:
+        first = _form(name)["body"][0]
+        assert first["type"] == "markdown", name
+        assert "Wi-Fi password" in first["attributes"]["value"], name
+        assert "API key" in first["attributes"]["value"], name
+
+
+def test_blank_issues_disabled():
+    config = yaml.safe_load((TEMPLATES / "config.yml").read_text(encoding="utf-8"))
+    assert config["blank_issues_enabled"] is False
+
+
+def test_pull_request_template_asks_for_checks():
+    text = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+    assert "personal data" in text
+    assert "node --test tests/card/*.mjs" in text

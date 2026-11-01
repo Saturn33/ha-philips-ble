@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Known issues
+    url: https://github.com/Saturn33/ha-philips-ble/blob/main/docs/KNOWN_ISSUES.md
+    about: Accepted limits of the integration and why they stay.
