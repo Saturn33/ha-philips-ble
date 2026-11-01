@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +21,22 @@ def test_manifest_and_hacs():
     assert manifest["dependencies"] == ["bluetooth", "http", "websocket_api"]
     assert manifest["single_config_entry"] is True
     assert hacs["name"] == "BLE Mesh Lights"
+
+
+def test_manifest_for_the_marketplace():
+    manifest = json.loads((ROOT / "custom_components/ble_mesh_lights/manifest.json").read_text())
+    assert manifest["version"] == "0.5.0"
+    assert manifest["documentation"] == "https://github.com/Saturn33/ha-philips-ble"
+    assert manifest["issue_tracker"] == "https://github.com/Saturn33/ha-philips-ble/issues"
+    assert manifest["categories"] == ["lighting.bulbs_lamps", "buttons_remotes"]
+
+
+def test_old_repository_name_is_gone():
+    old = "ha-philips-" + "valen-ble"  # split, or this file would match itself
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "grep", "-l", old], capture_output=True, text=True
+    ).stdout.split()
+    assert tracked == []
 
 
 def test_loader_skips_package_init(tmp_path):

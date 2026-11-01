@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
@@ -51,6 +52,23 @@ def test_example_node_uses_repo():
     assert "github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@" in text
     assert "path: esphome/components" in text
     assert "name: ble-proxy-tx-" in text
+
+
+def test_example_node_refs_match_release():
+    manifest = json.loads((ROOT / "custom_components/ble_mesh_lights/manifest.json").read_text())
+    node = _load_yaml(ESPHOME / "example-node.yaml")
+    tag = "v" + manifest["version"]
+    assert node["packages"]["ble_adv_tx"] == f"github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@{tag}"
+    (source,) = node["external_components"]
+    assert source["source"]["url"] == "https://github.com/Saturn33/ha-philips-ble"
+    assert source["source"]["ref"] == tag
+
+
+def test_readme_points_to_the_release():
+    readme = (ESPHOME / "README.md").read_text(encoding="utf-8")
+    assert "v0.5.0" in readme
+    assert "v0.1.0" not in readme
+    assert "Plan B" not in readme
 
 
 def test_local_node_builds_from_this_checkout():
