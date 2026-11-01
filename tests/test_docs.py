@@ -169,3 +169,15 @@ def test_agents_points_to_the_documents():
         "node --test tests/card/*.mjs",
     ):
         assert needle in agents, needle
+
+
+def test_licence_is_plain_mit():
+    """GitHub (and so HACS) recognises the licence only when LICENSE is the bare MIT text."""
+    licence = _read("LICENSE")
+    assert licence.startswith("MIT License\n")
+    assert licence.count("Permission is hereby granted") == 1
+    notices = _read("THIRD_PARTY_NOTICES.md")
+    for project in ("NicoIIT/esphome-ble_adv_proxy", "jphelan82/ha-philips-skylight"):
+        assert project in notices, project
+    assert notices.count("Permission is hereby granted") == 2
+    assert "THIRD_PARTY_NOTICES.md" in _read("README.md")

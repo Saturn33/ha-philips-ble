@@ -34,7 +34,7 @@ The board needs ESPHome firmware with this project's package, `ble-adv-tx`. The 
 3. **Create a new device**, skip the wizard's own setup, and replace the device's YAML with the content of [esphome/example-node.yaml](esphome/example-node.yaml). Change `name:` and `friendly_name:` to something that says where the board is, for example `ble-proxy-tx-kitchen`. The file takes the package from this repository's release:
    ```yaml
    packages:
-     ble_adv_tx: github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@v0.5.0
+     ble_adv_tx: github://Saturn33/ha-philips-ble/esphome/ble-adv-tx.yaml@v0.5.1
    ```
 4. **Fill in the secrets** (Device Builder, top right menu → Secrets): `wifi_ssid` and `wifi_password` for your 2.4 GHz Wi-Fi, an `api_key` (generate one as [esphome/README.md](esphome/README.md#secrets) shows) and a `fallback_password` of at least 8 characters.
 5. **Flash it** over USB the first time. Pick the option that fits:
@@ -125,4 +125,4 @@ Diagnostics for an issue: Settings → Devices & services → BLE Mesh Lights �
 
 Philips is a trademark of its owner; this project is not affiliated with or endorsed by it.
 
-Licensed under the [MIT licence](LICENSE). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Licensed under the [MIT licence](LICENSE); the licences of the projects above are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
