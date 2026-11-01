@@ -61,3 +61,21 @@ def test_markdown_links_resolve():
             if not ((ROOT / name).parent / path).exists():
                 broken.append(f"{name}: {target}")
     assert broken == []
+
+
+def test_profile_guide_covers_every_field():
+    import yaml
+
+    profile = yaml.safe_load(_read("custom_components/ble_mesh_lights/profiles/valen/profile.yaml"))
+    guide = _read("docs/PROFILES.md")
+    keys = set(profile)
+    for value in profile.values():  # network, power_on, remote, pairing, beacon
+        if isinstance(value, dict) and value is not profile["commands"]:
+            keys |= set(value)
+    for command in profile["commands"].values():
+        keys |= set(command) | set(command.get("effect", {}))
+    for key in sorted(keys):
+        assert f"`{key}`" in guide, key
+    for needle in ("tools/README.md", "docs/PROTOCOL.md", "remote.json", "tests/fixtures/profiles", "new_light"):
+        assert needle in guide, needle
+    assert "comes with the publishing version" not in guide
