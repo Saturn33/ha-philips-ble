@@ -29,3 +29,7 @@ tools/deploy.env
 
 # IDE settings
 .idea/
+
+# Private working documents (specs, plans, live checks): kept locally, never published
+docs/superpowers/
+docs/checks/
