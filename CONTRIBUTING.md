@@ -52,7 +52,7 @@ Write the test first, watch it fail, then make it pass. Documentation has tests 
 
 1. Raise `version` in `custom_components/ble_mesh_lights/manifest.json`. The tag must be the same version with a `v` in front.
 2. If the board package changed: raise `ble_adv_tx_version` in `esphome/ble-adv-tx.yaml` and `REQUIRED_PACKAGE_VERSION` in `const.py` (boards with an older package then get a repair asking for new firmware).
-3. Point `esphome/example-node.yaml` (both references) and the README at the new tag; `tests/test_firmware_files.py` checks they match the manifest.
+3. Point `esphome/example-node.yaml` (both references), `esphome/README.md` and the README at the new tag; the tests check that all three match the manifest version.
 4. Commit, tag `v<version>`, push the commit and the tag.
 5. Create a **GitHub release** for the tag (a tag alone is not a release for the Marketplace / HACS). Its text is what users see in Home Assistant's update dialog: put anything they must do first (a changed option, a removed entity, new board firmware), then the changes. Mark it as a pre-release to test with users who opted in.
 

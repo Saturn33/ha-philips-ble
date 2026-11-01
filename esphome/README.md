@@ -59,7 +59,7 @@ Never commit `secrets.yaml`.
 
 Pick one way.
 
-**ESPHome Device Builder (add-on in Home Assistant).** Create a new device, replace its YAML with your copy of `example-node.yaml`, and put the secrets into the Device Builder's own `secrets.yaml` (top right menu → Secrets). Install → "Plug into this computer" for the first flash over USB, or "Wirelessly" once the board runs ESPHome. (`local-node.yaml` needs the files of this folder, which the add-on does not have: use it from the command line.)
+**ESPHome Device Builder (add-on in Home Assistant).** Create a new device, replace its YAML with your copy of `example-node.yaml`, and put the secrets into the Device Builder's own `secrets.yaml` (top right menu → Secrets). For the first flash over USB: Install → "Plug into this computer" (needs Home Assistant opened over HTTPS: the browser's USB access works only there), or Install → **Manual download** → factory format and flash the downloaded file from web.esphome.io (below). "Wirelessly" once the board runs ESPHome. (`local-node.yaml` needs the files of this folder, which the add-on does not have: use it from the command line.)
 
 **ESPHome command line.**
 
@@ -73,7 +73,7 @@ In WSL, keep the build on the Linux disk (`export ESPHOME_DATA_DIR=~/.cache/esph
 
 The first build downloads the ESP-IDF toolchain (about 1 GB) and takes 10–20 minutes.
 
-**First flash from a browser (web.esphome.io).** Build the factory image (`esphome compile …`; it appears as `firmware.factory.bin` in the build folder), connect the board by USB-C with a data cable, open https://web.esphome.io in Chrome or Edge, choose Connect → the board's port → Install, and pick the image. If the port does not appear, hold the BOOT button while plugging the board in.
+**First flash from a browser (web.esphome.io).** Get the factory image (Device Builder: Install → Manual download → factory format; command line: `esphome compile …`, it appears as `firmware.factory.bin` in the build folder), connect the board by USB-C with a data cable, open https://web.esphome.io in Chrome or Edge, choose Connect → the board's port → Install, and pick the image. If the port does not appear, hold the BOOT button while plugging the board in.
 
 **Later updates go over the air:** `esphome upload ble-proxy-tx-kitchen.yaml --device <board IP>` (or `esphome run`, which builds first), or Install → Wirelessly in the Device Builder.
 

@@ -14,7 +14,7 @@
 - Verify Home Assistant behaviour in the installed Home Assistant source before relying on it, and cite file and function.
 - Tests first; all suites green before a commit.
 - Never send as a remote's Mesh address; never reuse a sender address with a lower sequence number.
-- No model-specific code: what differs between lights belongs in a profile.
+- No model-specific code: what differs between lights belongs in a profile (the card's `valen:` icons are the one exception).
 - Documentation and code in English; UI texts only through `strings.json` and `translations/` (en, ru, es).
 
 **Test commands** (repository root):

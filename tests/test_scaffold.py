@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load import load  # noqa: E402
 
@@ -31,12 +33,11 @@ def test_manifest_for_the_marketplace():
     assert manifest["categories"] == ["lighting.bulbs_lamps", "buttons_remotes"]
 
 
+@pytest.mark.skipif(not (ROOT / ".git").exists(), reason="needs a git checkout")
 def test_old_repository_name_is_gone():
     old = "ha-philips-" + "valen-ble"  # split, or this file would match itself
-    tracked = subprocess.run(
-        ["git", "-C", str(ROOT), "grep", "-l", old], capture_output=True, text=True
-    ).stdout.split()
-    assert tracked == []
+    found = subprocess.run(["git", "-C", str(ROOT), "grep", "-l", old], capture_output=True, text=True)
+    assert found.returncode == 1, found.stdout or found.stderr  # 1 = no match; 2+ = git failed
 
 
 def test_loader_skips_package_init(tmp_path):

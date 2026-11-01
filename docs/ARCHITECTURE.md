@@ -14,7 +14,7 @@ lights ◄──BLE Mesh──┘   (ESPHome + package   │    Bluetooth integr
 - **Boards** run a stock ESPHome Bluetooth proxy plus the package [`esphome/ble-adv-tx.yaml`](../esphome/ble-adv-tx.yaml): the vendored `ble_adv_proxy` component sends raw adverts (action `adv_svc_v1`) and forwards Mesh adverts (AD `0x2A`) as the event `esphome.ble_adv.raw_adv`; continuous scanning, a scan pause while sending, a package-version sensor and a heartbeat event. The integration never talks to a board in any other way.
 - **Light beacons** (power) arrive through Home Assistant's Bluetooth integration, fed by the same boards' Bluetooth proxy.
 - **The integration** encrypts and decrypts Mesh itself; a board only moves bytes.
-- **Profiles** (`custom_components/ble_mesh_lights/profiles/<id>/`) hold everything model-specific as data; the code knows no model. Format: [PROFILES.md](PROFILES.md).
+- **Profiles** (`custom_components/ble_mesh_lights/profiles/<id>/`) hold everything model-specific as data; the code knows no model, with one exception: the remote card draws its own `valen:` icons (`remote.json` may use only `valen:` or `mdi:` icons), so a light with other custom icons needs card code. Format: [PROFILES.md](PROFILES.md).
 
 ## Modules
 
@@ -43,19 +43,19 @@ Pure modules (`mesh`, `sequence`, `addressing`, `profile`, `state`, `planner`, `
 
 **Receiving presses.** A board forwards a Mesh advert → `mesh` decrypts with the profile's keys → `remotes` drops repeats (several boards, several copies per press: the pair source + sequence), counts misses from the sequence jump (`sequence_step` per press) → the press becomes an event of the remote's device and is applied to the state of the lights bound to that remote.
 
-**Presence.** Every beacon of a known light refreshes it; a check every 0.5 s turns a light "no power" after `active_timeout` (about 10 s) or, in quiet mode, `quiet_timeout` (190 s). A light that comes back is set to the profile's `power_on` state.
+**Presence.** Every beacon of a known light refreshes it; a check every 0.5 s turns a light "no power" after `active_timeout` (about 10 s) or, in quiet mode, `quiet_timeout` (190 s). A light that comes back with an active beacon (or switches from quiet to active, which only a power-on does) is set to the profile's `power_on` state; a quiet beacon after a loss means bursts were missed, and the stored state stays.
 
 ## Decisions and why
 
 - **One sender address per light**, derived from a base address (`0x7E00` + index). A light obeys only senders it has paired with, so separate addresses give per-light control with a broadcast destination. Addresses are never reused, and the integration never sends as a remote's address (the light would then ignore the real remote: replay protection is per sender).
-- **The state is believed, not measured.** The lights report nothing; every entity has `assumed_state`, and "State uncertain" says when HA knows it may be wrong (missed presses, a possible short power cut).
+- **The state is believed, not measured.** The lights report nothing; the light entity has `assumed_state`, and "State uncertain" says when HA knows it may be wrong (missed presses, a possible short power cut).
 - **The scene is derived from colour temperature and level** (`state.scene_of`), never remembered: an on light at a scene's exact pair is in that scene, however it got there. This keeps the light's effect, the "Scene" sensor and the card consistent. Hence a profile's scenes must each set both values and no two may share them.
 - **Card presses are queued, chains are not.** A new target from a slider or an automation cancels the unsent rest of the previous chain (generations in `hub._async_run`), which is right for "go to this state". A press on the card must behave like a press on the remote: three quick "brighter" are three steps, so card presses (`send_command` with `queue: true`) wait in a per-light queue of at most 10. A card press, like a real remote press, stops a chain started by HA.
 - **Presence is stored across reloads and restarts**, and a held advert (HA Bluetooth's cache of the last advert) is not a sighting. Otherwise every restart would bring switched-off lights back as on for minutes.
 - **Wizard texts per profile as translated step variants** (`<step>_<texts>`). A config flow does not know which user opened it, so a hint built on the server could only be in the server's language; step variants are translated by the frontend in each user's language. The cost: a new light with other gestures needs its own six keys in every translation.
 - **Outage restore is deliberately simple** until a separate outage detector exists: it fires on the rising edge of a chosen sensor; the known gaps are listed in [KNOWN_ISSUES.md](KNOWN_ISSUES.md#outage-restore-is-simple-until-the-outage-detector). Several attempts to patch the edge cases each broke a neighbouring case, so the redesign waits for the detector.
 - **The card is served by the integration** (a static path and `add_extra_js_url`, with a content hash in the URL), so it needs no separate frontend install and updates with the integration.
-- **Profiles are data.** No per-model code: a new light is a folder, checked by a schema with errors that name the file and the key.
+- **Profiles are data.** No per-model code (apart from the card's `valen:` icons): a new light is a folder, checked by a schema with errors that name the file and the key.
 
 ## Pitfalls already met
 
@@ -66,7 +66,7 @@ Each of these cost a release or a live check. Do not repeat them.
 - **Quiet mode:** 30 minutes after power-on a light beacons only once a minute, and about 1 in 20 bursts is missed; one missing burst is not a power cut.
 - **A light blinks only when it stores a new sender.** Pairing an address it already knows succeeds silently, so "Pair again" checks with an off/on test instead of asking "did it blink?".
 - **A light keeps at least six senders** (HA and five remotes were all accepted after one reset); the limit was not reached. Pairing never pushes out a remote in practice.
-- **A remote's pairing request is identical to ours** and carries no identity: HA hears it even when the light did not accept it, so a pairing request never binds a remote; a scene press does.
+- **A remote's pairing request is identical to ours** and carries no identity: HA hears it even when the light did not accept it. So the wizard never binds a remote on a pairing request; it waits for a scene press. Outside the wizard, a pairing request within 60 s after exactly one light of that profile got power binds the remote to that light (`hub._rebind_after_power_on`, `REBIND_WINDOW`): that is how a user re-pairs a remote by hand, and with two lights powered at once nothing is bound.
 - **A single-radio ESP32-C3 that scans all the time loses about 4 of 10 sends**; the scan pause while sending (`pause_scan_on_send`) fixed it. Wi-Fi roaming (`post_connect_roaming`) cut the HA connection for up to 45 s and is off.
 - **The card's file loads only with the page**: a dashboard opened before the integration loaded shows "Custom element doesn't exist" until reloaded. Accepted, documented in KNOWN_ISSUES.
 - **A flow does not know its user's language** (see the decision above); texts the server builds from names (a remote's button name, "New remote (…)") stay in the server language, documented in KNOWN_ISSUES.

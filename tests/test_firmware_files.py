@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,10 +66,12 @@ def test_example_node_refs_match_release():
 
 
 def test_readme_points_to_the_release():
+    manifest = json.loads((ROOT / "custom_components/ble_mesh_lights/manifest.json").read_text())
+    tag = "v" + manifest["version"]
     readme = (ESPHOME / "README.md").read_text(encoding="utf-8")
-    assert "v0.5.0" in readme
-    assert "v0.1.0" not in readme
+    assert f"`{tag}`" in readme and f"`@{tag}`" in readme and f"`ref: {tag}`" in readme
     assert "Plan B" not in readme
+    assert "Manual download" in readme  # flashing without HTTPS (Web Serial needs it)
 
 
 def test_local_node_builds_from_this_checkout():
@@ -101,6 +104,7 @@ def test_personal_nodes_are_not_committed():
     assert "/esphome/ble-proxy-tx-*.yaml" in ignored
 
 
+@pytest.mark.skipif(not (ROOT / ".git").exists(), reason="needs a git checkout")
 def test_ci_secrets_are_committed():
     # The firmware workflow copies these placeholders next to esphome/local-node.yaml.
     import subprocess

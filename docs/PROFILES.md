@@ -106,7 +106,7 @@ pairing: {command: pairing, requests: 20, interval: 0.5, after_power_on: true}
 
 - `command`: the command that asks the light to accept a new sender.
 - `requests`, `interval`: how many requests to send and how many seconds apart (20 × 0.5 s on the Valen, like its remote).
-- `after_power_on`: `true` if the light accepts pairing only right after it gets power: the wizard then asks the user to switch it off and on at the wall and pairs as soon as its beacon appears.
+- `after_power_on`: informational only for now: `true` says the light accepts pairing only right after it gets power. The wizard currently always asks the user to switch the light off and on at the wall and pairs as soon as its beacon appears, whatever the value.
 
 ### Beacon: `beacon`
 
