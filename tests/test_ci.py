@@ -45,7 +45,7 @@ def test_tests_workflow_covers_every_suite():
     for command in commands:
         assert command in runs, command
     card = workflow["jobs"]["card"]["steps"]
-    assert {"uses": "actions/setup-node@v4", "with": {"node-version": "24"}} in card
+    assert {"uses": "actions/setup-node@v7", "with": {"node-version": "24"}} in card
 
 
 def test_workflows_can_be_run_by_hand():
@@ -108,3 +108,20 @@ def test_pull_request_template_asks_for_checks():
     text = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
     assert "personal data" in text
     assert "node --test tests/card/*.mjs" in text
+
+
+def test_test_requirements_cover_the_tools():
+    """tests/test_tools.py runs the research tools, which import aioesphomeapi (CI, 2026-11-01)."""
+    requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8").splitlines()
+    assert "-r tools/requirements.txt" in requirements
+
+
+def test_actions_run_on_node_24():
+    """checkout@v4, setup-python@v5 and setup-node@v4 target the deprecated Node 20."""
+    wanted = {"actions/checkout": "v7", "actions/setup-python": "v7", "actions/setup-node": "v7"}
+    for path in WORKFLOWS.glob("*.yml"):
+        for job in _workflow(path.name)["jobs"].values():
+            for step in job["steps"]:
+                name, _, version = step.get("uses", "").partition("@")
+                if name in wanted:
+                    assert version == wanted[name], f"{path.name}: {step['uses']}"

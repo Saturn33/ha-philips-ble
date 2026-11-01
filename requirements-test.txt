@@ -3,3 +3,5 @@ PyYAML>=6
 pytest>=8
 pytest-asyncio>=0.24
 ruff>=0.6
+# tests/test_tools.py runs the research tools
+-r tools/requirements.txt
