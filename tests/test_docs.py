@@ -150,10 +150,10 @@ def test_contributing_has_setup_and_rules():
         "personal data",
         "Saturn33/ha-philips-ble",
         "topics",
-        "private",
     )
     for needle in needles:
         assert needle in contributing, needle
+    assert "`private`" not in contributing  # the maintainer's old private branch is gone (2026-11-01)
     releases = contributing[contributing.index("## Releases") :]
     assert "`esphome/README.md`" in releases
 

@@ -63,6 +63,6 @@ HACS refreshes its data about every 4 hours and the Marketplace reads it about e
 The public repository is `Saturn33/ha-philips-ble`. Its GitHub settings matter for the HACS validation:
 
 - a description, **topics** (`home-assistant`, `hacs`, `ble-mesh`, `philips`, `esphome`) and **issues** enabled;
-- push `main` and the release tags `v*` only. The maintainer's local branch `private` and its tags `private/*` hold the private working history and are never pushed.
+- push `main` and the release tags `v*`.
 
 Getting into the default catalog later: a pull request to `hacs/default` adding the repository to the `integration` file (alphabetical), from a personal account, with links to the latest release and to passing hassfest and HACS action runs.
